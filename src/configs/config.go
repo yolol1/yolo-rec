@@ -77,18 +77,18 @@ func (f *Feature) GetEffectiveDownloaderType() DownloaderType {
 
 // DanmakuConfig 弹幕录制配置
 type DanmakuConfig struct {
-	FontSize        int    `yaml:"font_size" json:"font_size"`               // 字体大小 (12~120)
-	FontName        string `yaml:"font_name" json:"font_name"`               // 字体名称
-	ScrollArea      string `yaml:"scroll_area" json:"scroll_area"`           // 滚动区域: full(全屏), top(顶部), bottom(底部)
-	ScrollTime      int    `yaml:"scroll_time" json:"scroll_time"`           // 弹幕滚过屏幕的秒数 (5~20)
-	Resolution      string `yaml:"resolution" json:"resolution"`             // 播放分辨率
-	Outline         int    `yaml:"outline" json:"outline"`                   // 描边粗细 (0~4)
-	Opacity         int    `yaml:"opacity" json:"opacity"`                   // 背景透明度 (0~255)
-	RecordGift      *bool  `yaml:"record_gift,omitempty" json:"record_gift,omitempty"`         // 是否录制礼物
-	RecordGuard     *bool  `yaml:"record_guard,omitempty" json:"record_guard,omitempty"`       // 是否录制上舰
+	FontSize        int    `yaml:"font_size" json:"font_size"`                                     // 字体大小 (12~120)
+	FontName        string `yaml:"font_name" json:"font_name"`                                     // 字体名称
+	ScrollArea      string `yaml:"scroll_area" json:"scroll_area"`                                 // 滚动区域: full(全屏), top(顶部), bottom(底部)
+	ScrollTime      int    `yaml:"scroll_time" json:"scroll_time"`                                 // 弹幕滚过屏幕的秒数 (5~20)
+	Resolution      string `yaml:"resolution" json:"resolution"`                                   // 播放分辨率
+	Outline         int    `yaml:"outline" json:"outline"`                                         // 描边粗细 (0~4)
+	Opacity         int    `yaml:"opacity" json:"opacity"`                                         // 背景透明度 (0~255)
+	RecordGift      *bool  `yaml:"record_gift,omitempty" json:"record_gift,omitempty"`             // 是否录制礼物
+	RecordGuard     *bool  `yaml:"record_guard,omitempty" json:"record_guard,omitempty"`           // 是否录制上舰
 	RecordSuperChat *bool  `yaml:"record_super_chat,omitempty" json:"record_super_chat,omitempty"` // 是否录制SC
-	GuardPosition   string `yaml:"guard_position" json:"guard_position"`     // 上舰位置: bottom-left, bottom-right, top-left, top-right
-	ScPosition      string `yaml:"sc_position" json:"sc_position"`           // SC位置: bottom-left, bottom-right, top-left, top-right
+	GuardPosition   string `yaml:"guard_position" json:"guard_position"`                           // 上舰位置: bottom-left, bottom-right, top-left, top-right
+	ScPosition      string `yaml:"sc_position" json:"sc_position"`                                 // SC位置: bottom-left, bottom-right, top-left, top-right
 }
 
 func BoolPtr(b bool) *bool { return &b }
@@ -288,15 +288,15 @@ type OnRecordFinished struct {
 	DeleteFlvAfterConvert bool         `yaml:"delete_flv_after_convert" json:"delete_flv_after_convert"`
 	CustomCommandline     string       `yaml:"custom_commandline" json:"custom_commandline"`
 	FixFlvAtFirst         bool         `yaml:"fix_flv_at_first" json:"fix_flv_at_first"`
-	SaveCover             bool         `yaml:"save_cover" json:"save_cover"`       // 保存视频第一帧作为封面图（.jpg）
-	CloudUpload           CloudUpload  `yaml:"cloud_upload" json:"cloud_upload"`   // 云上传配置
-	UploadTiming          UploadTiming `yaml:"upload_timing" json:"upload_timing"` // 上传时机
-	BurnSubtitles         bool         `yaml:"burn_subtitles" json:"burn_subtitles"`                         // 烧录弹幕字幕到视频（硬编码）
-	BurnSubtitlesCodec    string       `yaml:"burn_subtitles_codec" json:"burn_subtitles_codec"`             // 烧录用视频编码器，默认 libx264
-	BurnSubtitlesCrf      string       `yaml:"burn_subtitles_crf" json:"burn_subtitles_crf"`                 // 烧录用 CRF 质量值，默认 18
-	BurnSubtitlesPreset   string       `yaml:"burn_subtitles_preset" json:"burn_subtitles_preset"`           // 烧录用编码预设，默认 medium
-	BurnDeleteAss         bool         `yaml:"burn_delete_ass" json:"burn_delete_ass"`                       // 烧录后删除 ASS 文件
-	BurnDeleteSource      bool         `yaml:"burn_delete_source" json:"burn_delete_source"`                 // 烧录后删除源视频文件
+	SaveCover             bool         `yaml:"save_cover" json:"save_cover"`                       // 保存视频第一帧作为封面图（.jpg）
+	CloudUpload           CloudUpload  `yaml:"cloud_upload" json:"cloud_upload"`                   // 云上传配置
+	UploadTiming          UploadTiming `yaml:"upload_timing" json:"upload_timing"`                 // 上传时机
+	BurnSubtitles         bool         `yaml:"burn_subtitles" json:"burn_subtitles"`               // 烧录弹幕字幕到视频（硬编码）
+	BurnSubtitlesCodec    string       `yaml:"burn_subtitles_codec" json:"burn_subtitles_codec"`   // 烧录用视频编码器，默认 libx264
+	BurnSubtitlesCrf      string       `yaml:"burn_subtitles_crf" json:"burn_subtitles_crf"`       // 烧录用 CRF 质量值，默认 18
+	BurnSubtitlesPreset   string       `yaml:"burn_subtitles_preset" json:"burn_subtitles_preset"` // 烧录用编码预设，默认 medium
+	BurnDeleteAss         bool         `yaml:"burn_delete_ass" json:"burn_delete_ass"`             // 烧录后删除 ASS 文件
+	BurnDeleteSource      bool         `yaml:"burn_delete_source" json:"burn_delete_source"`       // 烧录后删除源视频文件
 }
 
 type Log struct {
@@ -1108,10 +1108,17 @@ func CloneConfigShallow(src *Config) *Config {
 		return nil
 	}
 	cp := *src // 先按值复制（浅拷贝）
-	// 切片拷贝
+
+	// 深度拷贝全局配置中的 OnRecordFinished
+	cp.OnRecordFinished = cloneOnRecordFinished(src.OnRecordFinished)
+
+	// 切片拷贝并深度拷贝 LiveRoom.OverridableConfig
 	if src.LiveRooms != nil {
 		cp.LiveRooms = make([]LiveRoom, len(src.LiveRooms))
-		copy(cp.LiveRooms, src.LiveRooms)
+		for i, room := range src.LiveRooms {
+			cp.LiveRooms[i] = room
+			cp.LiveRooms[i].OverridableConfig = cloneOverridableConfig(room.OverridableConfig)
+		}
 	}
 	// map 拷贝
 	if src.Cookies != nil {
@@ -1120,11 +1127,13 @@ func CloneConfigShallow(src *Config) *Config {
 			cp.Cookies[k] = v
 		}
 	}
-	// PlatformConfigs 拷贝
+	// PlatformConfigs 拷贝并深度拷贝 PlatformConfig.OverridableConfig
 	if src.PlatformConfigs != nil {
 		cp.PlatformConfigs = make(map[string]PlatformConfig, len(src.PlatformConfigs))
 		for k, v := range src.PlatformConfigs {
-			cp.PlatformConfigs[k] = v
+			pc := v
+			pc.OverridableConfig = cloneOverridableConfig(v.OverridableConfig)
+			cp.PlatformConfigs[k] = pc
 		}
 	}
 	// liveRoomIndexCache 拷贝，避免刷新索引时影响旧快照
@@ -1137,6 +1146,68 @@ func CloneConfigShallow(src *Config) *Config {
 		cp.liveRoomIndexCache = map[string]int{}
 	}
 	return &cp
+}
+
+func cloneOnRecordFinished(src OnRecordFinished) OnRecordFinished {
+	dst := src
+	if src.CloudUpload.AdditionalStorages != nil {
+		dst.CloudUpload.AdditionalStorages = make([]string, len(src.CloudUpload.AdditionalStorages))
+		copy(dst.CloudUpload.AdditionalStorages, src.CloudUpload.AdditionalStorages)
+	}
+	return dst
+}
+
+func cloneOverridableConfig(src OverridableConfig) OverridableConfig {
+	dst := src
+	if src.Interval != nil {
+		v := *src.Interval
+		dst.Interval = &v
+	}
+	if src.OutPutPath != nil {
+		v := *src.OutPutPath
+		dst.OutPutPath = &v
+	}
+	if src.FfmpegPath != nil {
+		v := *src.FfmpegPath
+		dst.FfmpegPath = &v
+	}
+	if src.Log != nil {
+		v := *src.Log
+		dst.Log = &v
+	}
+	if src.Feature != nil {
+		v := *src.Feature
+		dst.Feature = &v
+	}
+	if src.OutputTmpl != nil {
+		v := *src.OutputTmpl
+		dst.OutputTmpl = &v
+	}
+	if src.VideoSplitStrategies != nil {
+		v := *src.VideoSplitStrategies
+		dst.VideoSplitStrategies = &v
+	}
+	if src.OnRecordFinished != nil {
+		v := cloneOnRecordFinished(*src.OnRecordFinished)
+		dst.OnRecordFinished = &v
+	}
+	if src.TimeoutInUs != nil {
+		v := *src.TimeoutInUs
+		dst.TimeoutInUs = &v
+	}
+	if src.StreamPreference != nil {
+		v := *src.StreamPreference
+		dst.StreamPreference = &v
+	}
+	if src.DanmakuEnable != nil {
+		v := *src.DanmakuEnable
+		dst.DanmakuEnable = &v
+	}
+	if src.Danmaku != nil {
+		v := *src.Danmaku
+		dst.Danmaku = &v
+	}
+	return dst
 }
 
 // ResolveConfigForRoom 为指定房间解析最终的配置值

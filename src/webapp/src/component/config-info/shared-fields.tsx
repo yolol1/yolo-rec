@@ -33,11 +33,13 @@ interface PreviewResult {
 interface OutputTemplatePreviewProps {
   form: any; // Antd Form 实例
   displayStyle?: 'global' | 'compact'; // global 使用 Alert，compact 使用 Tag
+  defaultTemplate?: string; // 默认/继承的模板内容
 }
 
 export const OutputTemplatePreview: React.FC<OutputTemplatePreviewProps> = ({
   form,
-  displayStyle = 'compact'
+  displayStyle = 'compact',
+  defaultTemplate
 }) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PreviewResult | null>(null);
@@ -55,6 +57,12 @@ export const OutputTemplatePreview: React.FC<OutputTemplatePreviewProps> = ({
       setResult({ success: false, error: '预览失败' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFillDefault = () => {
+    if (defaultTemplate) {
+      form.setFieldsValue({ out_put_tmpl: defaultTemplate });
     }
   };
 
@@ -89,6 +97,14 @@ export const OutputTemplatePreview: React.FC<OutputTemplatePreviewProps> = ({
 
   return (
     <Space wrap>
+      {defaultTemplate && (
+        <Button
+          size={displayStyle === 'compact' ? 'small' : 'middle'}
+          onClick={handleFillDefault}
+        >
+          {displayStyle === 'global' ? '填入默认模板' : '填入继承配置'}
+        </Button>
+      )}
       <Button
         size={displayStyle === 'compact' ? 'small' : 'middle'}
         icon={<EyeOutlined />}

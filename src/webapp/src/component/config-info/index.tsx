@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Tabs, Button, message, Spin, Input, Switch, InputNumber, Form,
   Tag, Space, Divider, Alert, Modal, Select,
-  List, Badge, Tooltip, Card, Collapse
+  List, Badge, Tooltip, Card, Collapse, Popover
 } from 'antd';
 // @ts-ignore
 import {
@@ -10,7 +10,7 @@ import {
   BellOutlined, LinkOutlined, InfoCircleOutlined, SaveOutlined,
   ReloadOutlined, EditOutlined, DeleteOutlined,
   RightOutlined, PlusOutlined, WarningOutlined,
-  ExclamationCircleOutlined, MobileOutlined
+  ExclamationCircleOutlined, MobileOutlined, QuestionCircleOutlined
 } from '@ant-design/icons';
 import { useLocation, Link } from 'react-router-dom';
 import Editor from 'react-simple-code-editor';
@@ -32,6 +32,76 @@ const { TextArea } = Input;
 // 与后端 configs.EnableProxyConfig 对应
 const ENABLE_PROXY_CONFIG = false;
 const { Panel } = Collapse;
+
+const streamPreferenceHelp = (
+  <div style={{ maxWidth: 450 }}>
+    <p style={{ marginBottom: 8, fontSize: '13px', lineHeight: '1.6' }}>
+      <strong>权重匹配机制：</strong>
+      系统会获取直播间所有可用的原始流，并与其属性逐一匹配。每成功匹配一个键值对（如 <code>codec=h265</code>），该流的权重加 1，最终选择<b>权重最高的流</b>进行录制（若无任何匹配则使用第一个有效流）。
+    </p>
+    <p style={{ marginBottom: 8, fontSize: '13px', lineHeight: '1.6' }}>
+      <strong style={{ color: '#faad14' }}>💡 注意：</strong>
+      “流容器格式”是指拉取直播网络流时的格式，直播源仅支持 <code>flv</code>、<code>ts</code>、<code>fmp4</code> 等，<b>不能填写</b> <code>mp4</code> 或 <code>mkv</code>。如需转换为 <code>mp4</code>，应使用下方的“转换为 MP4”或“自定义命令”功能。
+    </p>
+    <Divider style={{ margin: '8px 0' }} />
+    <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: '13px' }}>各平台常用属性键值规范：</div>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', border: '1px solid #f0f0f0' }}>
+      <thead>
+        <tr style={{ background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+          <th style={{ padding: '6px 8px', textAlign: 'left', width: '80px', borderRight: '1px solid #f0f0f0' }}>平台</th>
+          <th style={{ padding: '6px 8px', textAlign: 'left', width: '110px', borderRight: '1px solid #f0f0f0' }}>可选属性名 (Key)</th>
+          <th style={{ padding: '6px 8px', textAlign: 'left' }}>推荐填写的属性值 (Value) 与说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+          <td style={{ padding: '6px 8px', fontWeight: 'bold', borderRight: '1px solid #f0f0f0' }}>Bilibili</td>
+          <td style={{ padding: '6px 8px', borderRight: '1px solid #f0f0f0' }}>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>codec</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>format_name</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>协议</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>画质</div>
+          </td>
+          <td style={{ padding: '6px 8px' }}>
+            <div><code>h264</code> 或 <code>h265</code> <span style={{ color: '#8c8c8c' }}>(勿填 avc/hevc)</span></div>
+            <div><code>flv</code>, <code>ts</code>, <code>fmp4</code></div>
+            <div><code>http_stream</code> <span style={{ color: '#8c8c8c' }}>(FLV)</span> 或 <code>http_hls</code> <span style={{ color: '#8c8c8c' }}>(HLS)</span></div>
+            <div><code>原画</code>, <code>蓝光</code>, <code>超清</code> 等</div>
+          </td>
+        </tr>
+        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+          <td style={{ padding: '6px 8px', fontWeight: 'bold', borderRight: '1px solid #f0f0f0' }}>SOOP</td>
+          <td style={{ padding: '6px 8px', borderRight: '1px solid #f0f0f0' }}>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>format</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>quality_key</div>
+          </td>
+          <td style={{ padding: '6px 8px' }}>
+            <div><code>hls</code></div>
+            <div>画质预设标识 (如 <code>original</code>, <code>hd</code> 等)</div>
+          </td>
+        </tr>
+        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+          <td style={{ padding: '6px 8px', fontWeight: 'bold', borderRight: '1px solid #f0f0f0' }}>Douyu</td>
+          <td style={{ padding: '6px 8px', borderRight: '1px solid #f0f0f0' }}>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>线路</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>画质</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>编码</div>
+            <div style={{ fontFamily: 'monospace', color: '#c41d7f' }}>协议</div>
+          </td>
+          <td style={{ padding: '6px 8px' }}>
+            <div>CDN 线路名 (如 <code>主线路</code>, <code>阿里</code>, <code>腾讯</code> 等)</div>
+            <div>清晰度名 (如 <code>原画</code>, <code>超清</code>, <code>高清</code> 等)</div>
+            <div><code>h264</code> 或 <code>hevc</code></div>
+            <div><code>flv</code> 或 <code>hls</code></div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div style={{ fontSize: '11px', color: '#8c8c8c', marginTop: 8 }}>
+      * 其它平台由于通常只返回单一有效流，在此配置流属性匹配一般不生效。
+    </div>
+  </div>
+);
 
 // 配置项类型定义
 // 下载器可用性信息
@@ -232,8 +302,8 @@ const InheritanceIndicator: React.FC<{
 
 // 配置项组件
 interface ConfigFieldProps {
-  label: string;
-  description?: string;
+  label: React.ReactNode;
+  description?: React.ReactNode;
   children: React.ReactElement;
   effectiveValue?: string;
   inheritance?: {
@@ -481,7 +551,7 @@ const GlobalSettings: React.FC<{
           <ConfigField
             label="输出文件名模板"
             description="自定义录制文件的命名模板"
-            actions={<OutputTemplatePreview form={form} displayStyle="global" />}
+            actions={<OutputTemplatePreview form={form} displayStyle="global" defaultTemplate={config.default_out_put_tmpl} />}
           >
             <Form.Item name="out_put_tmpl" noStyle>
               <TextArea
@@ -574,8 +644,20 @@ const GlobalSettings: React.FC<{
             </Form.Item>
           </ConfigField>
           <ConfigField
-            label="流属性偏好"
-            description="键值对形式的流属性筛选条件，例如 format=flv, codec=h264"
+            label={
+              <Space size={4}>
+                <span>流属性偏好</span>
+                <Popover
+                  title="流属性偏好填写指南"
+                  trigger="hover"
+                  placement="rightTop"
+                  content={streamPreferenceHelp}
+                >
+                  <QuestionCircleOutlined style={{ color: '#1890ff', cursor: 'pointer' }} />
+                </Popover>
+              </Space>
+            }
+            description="键值对形式的流属性筛选条件，例如 format=flv, codec=h264（悬停 ❓ 查看填写规范）"
           >
             <Form.List name={['stream_preference', 'attributes']}>
               {(fields, { add, remove }) => (
@@ -1362,7 +1444,7 @@ const PlatformConfigForm: React.FC<{
             inheritedValue: globalConfig?.out_put_tmpl || globalConfig?.default_out_put_tmpl
           }}
           id={`platforms-${platformKey}-out_put_tmpl`}
-          actions={<OutputTemplatePreview form={form} displayStyle="compact" />}
+          actions={<OutputTemplatePreview form={form} displayStyle="compact" defaultTemplate={globalConfig?.out_put_tmpl || globalConfig?.default_out_put_tmpl} />}
           useTagMode
         >
           <Form.Item name="out_put_tmpl" noStyle>
@@ -1441,8 +1523,20 @@ const PlatformConfigForm: React.FC<{
         </ConfigField>
 
         <ConfigField
-          label="流属性偏好"
-          description="键值对形式的流属性筛选条件，留空则继承全局设置"
+          label={
+            <Space size={4}>
+              <span>流属性偏好</span>
+              <Popover
+                title="流属性偏好填写指南"
+                trigger="hover"
+                placement="rightTop"
+                content={streamPreferenceHelp}
+              >
+                <QuestionCircleOutlined style={{ color: '#1890ff', cursor: 'pointer' }} />
+              </Popover>
+            </Space>
+          }
+          description="键值对形式的流属性筛选条件，留空则继承全局设置（悬停 ❓ 查看填写规范）"
         >
           <Form.List name={['stream_preference', 'attributes']}>
             {(fields, { add, remove }) => (
@@ -1734,7 +1828,7 @@ export const RoomConfigForm: React.FC<{
           inheritedValue: (platformConfig as any)?.out_put_tmpl || globalConfig?.out_put_tmpl || globalConfig?.default_out_put_tmpl
         }}
         id={`rooms-live-${room.live_id}-out_put_tmpl`}
-        actions={<OutputTemplatePreview form={form} displayStyle="compact" />}
+        actions={<OutputTemplatePreview form={form} displayStyle="compact" defaultTemplate={(platformConfig as any)?.out_put_tmpl || globalConfig?.out_put_tmpl || globalConfig?.default_out_put_tmpl} />}
         useTagMode
       >
         <Form.Item name="out_put_tmpl" noStyle>
@@ -1818,8 +1912,20 @@ export const RoomConfigForm: React.FC<{
       </ConfigField>
 
       <ConfigField
-        label="流属性偏好"
-        description="键值对形式的流属性筛选条件，留空则继承平台/全局设置"
+        label={
+          <Space size={4}>
+            <span>流属性偏好</span>
+            <Popover
+              title="流属性偏好填写指南"
+              trigger="hover"
+              placement="rightTop"
+              content={streamPreferenceHelp}
+            >
+              <QuestionCircleOutlined style={{ color: '#1890ff', cursor: 'pointer' }} />
+            </Popover>
+          </Space>
+        }
+        description="键值对形式的流属性筛选条件，留空则继承平台/全局设置（悬停 ❓ 查看填写规范）"
       >
         <Form.List name={['stream_preference', 'attributes']}>
           {(fields, { add, remove }) => (

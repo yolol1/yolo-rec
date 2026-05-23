@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/alecthomas/kingpin"
@@ -111,13 +112,27 @@ func goGenerate(c *kingpin.ParseContext) error {
 
 func buildWeb(c *kingpin.ParseContext) error {
 	webappDir := filepath.Join("src", "webapp")
-	err := utils.ExecCommandsInDir(
-		[][]string{
+	
+	// 优先使用 yarn，如果不可用则使用 npm
+	packageManager := "yarn"
+	if _, err := exec.LookPath("yarn"); err != nil {
+		packageManager = "npm"
+	}
+
+	var commands [][]string
+	if packageManager == "yarn" {
+		commands = [][]string{
 			{"yarn", "install"},
 			{"yarn", "build"},
-		},
-		webappDir,
-	)
+		}
+	} else {
+		commands = [][]string{
+			{"npm", "install"},
+			{"npm", "run", "build"},
+		}
+	}
+
+	err := utils.ExecCommandsInDir(commands, webappDir)
 	if err != nil {
 		return err
 	}

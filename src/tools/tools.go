@@ -320,9 +320,14 @@ func startBTools() error {
 	)
 	cmd.Dir = btoolsFolder
 	cmd.Env = env
-	// 动态决定是否输出，保留错误信息
+	// 动态决定是否输出，保留错误信息，同时过滤掉已知的无上下文反爬噪音
 	cmd.Stdout = utils.NewDebugControlledWriter(os.Stdout)
-	cmd.Stderr = utils.NewLogFilterWriter(os.Stderr)
+	cmd.Stderr = utils.NewFilteredLineWriter(func(line string, isImportant bool) {
+		if strings.Contains(line, "API webHTML") {
+			return
+		}
+		os.Stderr.Write([]byte(line + "\n"))
+	})
 
 	blog.GetLogger().Infoln("Starting bililive-tools server…")
 

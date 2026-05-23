@@ -6,12 +6,12 @@ import (
 
 // 内置阶段名称常量
 const (
-	StageNameFixFlv         = "fix_flv"
-	StageNameConvertMp4     = "convert_mp4"
-	StageNameExtractCover   = "extract_cover"
-	StageNameCloudUpload    = "cloud_upload"
-	StageNameCustomCmd      = "custom_command"
-	StageNameBurnSubtitles  = "burn_subtitles"
+	StageNameFixFlv        = "fix_flv"
+	StageNameConvertMp4    = "convert_mp4"
+	StageNameExtractCover  = "extract_cover"
+	StageNameCloudUpload   = "cloud_upload"
+	StageNameCustomCmd     = "custom_command"
+	StageNameBurnSubtitles = "burn_subtitles"
 )
 
 // 阶段选项键常量
@@ -93,10 +93,10 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 		stages = append(stages, StageConfig{
 			Name: StageNameBurnSubtitles,
 			Options: map[string]any{
-				OptionCodec:           legacy.BurnSubtitlesCodec,
-				OptionCrf:             legacy.BurnSubtitlesCrf,
-				OptionPreset:          legacy.BurnSubtitlesPreset,
-				OptionBurnDeleteAss:   legacy.BurnDeleteAss,
+				OptionCodec:            legacy.BurnSubtitlesCodec,
+				OptionCrf:              legacy.BurnSubtitlesCrf,
+				OptionPreset:           legacy.BurnSubtitlesPreset,
+				OptionBurnDeleteAss:    legacy.BurnDeleteAss,
 				OptionBurnDeleteSource: legacy.BurnDeleteSource,
 			},
 		})

@@ -121,7 +121,7 @@ func (r *DouyinDanmakuRecorder) GetStatus() map[string]interface{} {
 
 	status := map[string]interface{}{
 		"danmaku_running": r.running,
-		"danmaku_count":  r.count,
+		"danmaku_count":   r.count,
 		"danmaku_output":  r.outputFile,
 	}
 	if r.running {

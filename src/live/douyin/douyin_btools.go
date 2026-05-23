@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/bililive-go/bililive-go/src/live"
 )
@@ -15,6 +18,26 @@ var btoolsConsts = struct {
 }{
 	port:      18110,
 	authToken: "Basic YTph",
+}
+
+var btoolsHttpClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
+
+func getBtoolsPort() int {
+	if envPort := os.Getenv("DOUYIN_BTOOLS_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			return p
+		}
+	}
+	return btoolsConsts.port
+}
+
+func getBtoolsToken() string {
+	if envToken := os.Getenv("DOUYIN_BTOOLS_TOKEN"); envToken != "" {
+		return envToken
+	}
+	return btoolsConsts.authToken
 }
 
 type ChannelInfo struct {
@@ -69,15 +92,18 @@ func (l *btoolsLive) updateChannelInfo() (err error) {
 
 func (l *btoolsLive) fetchChannelInfo() (channelInfo ChannelInfo, err error) {
 	// 使用自定义请求以便添加认证Header
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/channel-info?url=%s", btoolsConsts.port, url.QueryEscape(l.Url.String()))
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/channel-info?url=%s", getBtoolsPort(), url.QueryEscape(l.Url.String()))
 	req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)
 	if reqErr != nil {
 		err = reqErr
 		return
 	}
-	req.Header.Set("Authorization", btoolsConsts.authToken)
+	req.Header.Set("Authorization", getBtoolsToken())
+	if cookieVal := getDouyinCookie(); cookieVal != "" {
+		req.Header.Set("Cookie", cookieVal)
+	}
 
-	resp, doErr := http.DefaultClient.Do(req)
+	resp, doErr := btoolsHttpClient.Do(req)
 	if doErr != nil {
 		err = doErr
 		return
@@ -103,14 +129,17 @@ func (l *btoolsLive) fetchLiveInfo() (liveInfo liveInfoResp, err error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/live-info?platform=douyin&roomId=%s", btoolsConsts.port, url.QueryEscape(l.roomId))
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/live-info?platform=douyin&roomId=%s", getBtoolsPort(), url.QueryEscape(l.roomId))
 	req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)
 	if reqErr != nil {
 		return liveInfo, reqErr
 	}
-	req.Header.Set("Authorization", btoolsConsts.authToken)
+	req.Header.Set("Authorization", getBtoolsToken())
+	if cookieVal := getDouyinCookie(); cookieVal != "" {
+		req.Header.Set("Cookie", cookieVal)
+	}
 
-	resp, doErr := http.DefaultClient.Do(req)
+	resp, doErr := btoolsHttpClient.Do(req)
 	if doErr != nil {
 		return liveInfo, doErr
 	}
@@ -132,14 +161,17 @@ func (l *btoolsLive) fetchStreamInfo() (streamInfo streamInfoResp, err error) {
 		}
 	}
 
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/stream-info?platform=douyin&roomId=%s", btoolsConsts.port, url.QueryEscape(l.roomId))
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/stream-info?platform=douyin&roomId=%s", getBtoolsPort(), url.QueryEscape(l.roomId))
 	req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)
 	if reqErr != nil {
 		return streamInfo, reqErr
 	}
-	req.Header.Set("Authorization", btoolsConsts.authToken)
+	req.Header.Set("Authorization", getBtoolsToken())
+	if cookieVal := getDouyinCookie(); cookieVal != "" {
+		req.Header.Set("Cookie", cookieVal)
+	}
 
-	resp, doErr := http.DefaultClient.Do(req)
+	resp, doErr := btoolsHttpClient.Do(req)
 	if doErr != nil {
 		return streamInfo, doErr
 	}

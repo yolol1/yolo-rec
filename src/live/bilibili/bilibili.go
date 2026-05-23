@@ -262,8 +262,12 @@ func (l *Live) GetStreamInfos() (infos []*live.StreamUrlInfo, err error) {
 						acceptQn := int(acceptQnObj.Int())
 						// 确定清晰度
 						quality := getQualityName(acceptQn)
+						var realUrl *url.URL
+						if acceptQn == currentQn {
+							realUrl = u
+						}
 						info := &live.StreamUrlInfo{
-							Url:                  u,
+							Url:                  realUrl,
 							Name:                 fmt.Sprintf("%s - %s", quality, format),
 							Quality:              quality,
 							Format:               format,

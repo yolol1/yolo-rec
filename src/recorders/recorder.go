@@ -294,7 +294,8 @@ func (r *recorder) tryRecord(ctx context.Context) {
 		// TODO: remove deprecated method GetStreamUrls
 		//nolint:staticcheck
 		if urls, err = r.Live.GetStreamUrls(); err == live.ErrNotImplemented {
-			panic("GetStreamInfos and GetStreamUrls are not implemented for " + r.Live.GetPlatformCNName())
+			r.getLogger().Errorf("GetStreamInfos and GetStreamUrls are not implemented for %s", r.Live.GetPlatformCNName())
+			return
 		} else if err == nil {
 			streamInfos = utils.GenUrlInfos(urls, make(map[string]string))
 		}
@@ -328,7 +329,8 @@ func (r *recorder) tryRecord(ctx context.Context) {
 
 	buf := new(bytes.Buffer)
 	if err = tmpl.Execute(buf, info); err != nil {
-		panic(fmt.Sprintf("failed to render filename, err: %v", err))
+		r.getLogger().Errorf("failed to render filename, err: %v", err)
+		return
 	}
 	// 使用层级配置的 OutPutPath
 	fileName := filepath.Join(resolvedConfig.OutPutPath, buf.String())
@@ -733,9 +735,14 @@ func (r *recorder) selectPreferredStream(streamInfos []*live.StreamUrlInfo) (ret
 
 	streamPreference := configs.GetCurrentConfig().GetEffectiveConfigForRoom(r.Live.GetRawUrl()).StreamPreference
 
-	// 如果未配置流偏好（Quality 和 Attributes 均为 nil），直接返回第一个流
+	// 如果未配置流偏好（Quality 和 Attributes 均为 nil），直接返回第一个具有真实 URL 的流
 	if streamPreference.Quality == nil && streamPreference.Attributes == nil {
-		return streamInfos[0]
+		for _, info := range streamInfos {
+			if info.Url != nil {
+				return info
+			}
+		}
+		return nil
 	}
 
 	// 安全获取 Quality 和 Attributes，处理 nil 情况
@@ -748,8 +755,41 @@ func (r *recorder) selectPreferredStream(streamInfos []*live.StreamUrlInfo) (ret
 		attrs = *streamPreference.Attributes
 	}
 
+	// 诊断逻辑：检查用户偏好的属性 Key 在当前平台流属性中是否存在，以便友好提示拼写错误或不支持的情况
+	if len(attrs) > 0 {
+		availableKeysMap := make(map[string]bool)
+		for _, info := range streamInfos {
+			if info.Url == nil {
+				continue
+			}
+			for k := range info.AttributesForStreamSelect {
+				availableKeysMap[k] = true
+			}
+		}
+
+		var availableKeys []string
+		for k := range availableKeysMap {
+			availableKeys = append(availableKeys, k)
+		}
+		// 排序以使日志输出稳定
+		sort.Strings(availableKeys)
+
+		if len(availableKeys) == 0 {
+			r.getLogger().Warnf("当前平台(%s)未提供任何用于筛选的流属性，您的属性偏好配置 %v 将无法生效", r.Live.GetPlatformCNName(), attrs)
+		} else {
+			for k := range attrs {
+				if !availableKeysMap[k] {
+					r.getLogger().Warnf("检测到偏好设置了在当前平台(%s)流属性中不存在的键 '%s'，可能无法生效。当前实际支持的属性键有: %v，请检查拼写是否正确", r.Live.GetPlatformCNName(), k, availableKeys)
+				}
+			}
+		}
+	}
+
 	retMatchedCount := 0
 	for _, info := range streamInfos {
+		if info.Url == nil { // 过滤掉无真实 URL 的占位符流
+			continue
+		}
 		currMatchedCount := 0
 		// 仅当配置了 Quality 时才匹配
 		if quality != "" && info.Quality == quality {
@@ -767,10 +807,20 @@ func (r *recorder) selectPreferredStream(streamInfos []*live.StreamUrlInfo) (ret
 		}
 	}
 
-	// 如果没有任何匹配的流，回退到第一个可用流
+	// 如果没有任何匹配的流，回退到第一个具有真实 URL 的可用流
 	if ret == nil {
+		var firstValid *live.StreamUrlInfo
+		for _, info := range streamInfos {
+			if info.Url != nil {
+				firstValid = info
+				break
+			}
+		}
+		if firstValid == nil {
+			return nil
+		}
 		r.getLogger().Warnf("没有流匹配配置的偏好 (quality=%s, attrs=%v)，使用第一个可用流", quality, attrs)
-		return streamInfos[0]
+		return firstValid
 	}
 	return
 }
@@ -778,6 +828,11 @@ func (r *recorder) selectPreferredStream(streamInfos []*live.StreamUrlInfo) (ret
 func (r *recorder) run(ctx context.Context) {
 	defer close(r.done)
 	defer r.sendAccumulatedSummary()
+	defer func() {
+		if recoveryErr := recover(); recoveryErr != nil {
+			r.getLogger().Errorf("recorder panicked: %v", recoveryErr)
+		}
+	}()
 
 	const minRetryInterval = 5 * time.Second
 

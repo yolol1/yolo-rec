@@ -4,6 +4,7 @@ package live
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -539,8 +540,8 @@ func (w *WrappedLive) getConfiguredInterval() int {
 
 // randomJitter 生成 -3000 到 +3000 毫秒的随机抖动
 func randomJitter() int64 {
-	// 使用简单的方法生成随机数，避免导入额外的包
-	return (time.Now().UnixNano() % 6001) - 3000
+	// 使用 math/rand 线程安全发生器，防惊群效应
+	return rand.Int63n(6001) - 3000
 }
 
 // waitForPlatformRateLimit 在通用位置等待平台访问频率限制
@@ -576,7 +577,11 @@ func New(ctx context.Context, room *configs.LiveRoom, cache gcache.Cache) (live 
 			}
 			return
 		}
-		time.Sleep(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
 	}
 
 	// when room initializaion is failed
