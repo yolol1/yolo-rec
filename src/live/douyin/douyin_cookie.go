@@ -17,6 +17,7 @@ import (
 var (
 	autoCookie string
 	lastSynced string
+	syncMu     sync.Mutex // Ensures only one sync operation runs at a time
 	cookieMu   sync.RWMutex
 )
 
@@ -56,23 +57,35 @@ func getDouyinCookie() string {
 	}
 
 	// 检查是否需要同步到 btools
-	cookieMu.Lock()
-	if c != lastSynced {
-		lastSynced = c
-		cookieMu.Unlock()
-		// 异步进行同步，以免阻塞当前请求
-		go syncCookieToBtools(c)
-	} else {
-		cookieMu.Unlock()
+	cookieMu.RLock()
+	needSync := c != lastSynced
+	cookieMu.RUnlock()
+
+	if needSync {
+		syncMu.Lock()
+		// 双重检查
+		cookieMu.RLock()
+		stillNeedSync := c != lastSynced
+		cookieMu.RUnlock()
+
+		if stillNeedSync {
+			success := syncCookieToBtools(c)
+			if success {
+				cookieMu.Lock()
+				lastSynced = c
+				cookieMu.Unlock()
+			}
+		}
+		syncMu.Unlock()
 	}
 
 	return c
 }
 
-// syncCookieToBtools 将 Cookie 同步到 btools 配置中
-func syncCookieToBtools(cookieVal string) {
+// syncCookieToBtools 将 Cookie 同步到 btools 配置中，包含重试机制
+func syncCookieToBtools(cookieVal string) bool {
 	if strings.TrimSpace(cookieVal) == "" {
-		return
+		return false
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/config/set", getBtoolsPort())
@@ -85,32 +98,41 @@ func syncCookieToBtools(cookieVal string) {
 	payloadBytes, err := json.Marshal(payloadMap)
 	if err != nil {
 		blog.GetLogger().WithError(err).Error("序列化 Cookie 同步 payload 失败")
-		return
+		return false
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		blog.GetLogger().WithError(err).Error("创建 Cookie 同步请求失败")
-		return
-	}
+	for i := 0; i < 15; i++ {
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			blog.GetLogger().WithError(err).Error("创建 Cookie 同步请求失败")
+			return false
+		}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", getBtoolsToken())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", getBtoolsToken())
 
-	resp, err := btoolsHttpClient.Do(req)
-	if err != nil {
-		// 可能是 btools 还没启动好，打印 Debug 日志，不打 Error
-		blog.GetLogger().WithError(err).Debug("同步 Cookie 到 btools 失败，btools 可能尚未就绪")
-		return
-	}
-	defer resp.Body.Close()
+		resp, err := btoolsHttpClient.Do(req)
+		if err != nil {
+			blog.GetLogger().WithError(err).Debug("同步 Cookie 到 btools 失败，btools 可能尚未就绪，稍后重试...")
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		blog.GetLogger().Warnf("同步 Cookie 到 btools 响应状态异常: %d, body: %s", resp.StatusCode, string(body))
-	} else {
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			blog.GetLogger().Warnf("同步 Cookie 到 btools 响应状态异常: %d, body: %s，稍后重试...", resp.StatusCode, string(body))
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
 		blog.GetLogger().Info("成功同步最新抖音 Cookie 到 btools")
+		return true
 	}
+
+	blog.GetLogger().Error("同步 Cookie 到 btools 最终失败")
+	return false
 }
 
 func autoFetchDouyinCookie() (string, error) {

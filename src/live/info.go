@@ -60,6 +60,7 @@ type Info struct {
 	Initializing         bool
 	CustomLiveId         string
 	AudioOnly            bool
+	AutoRecord           bool
 	// 最近一次 API 请求的错误信息（用于前端显示错误提示）
 	LastError string
 	// 可用流列表（最近一次获取的）
@@ -88,11 +89,14 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		Initializing              bool                   `json:"initializing"`
 		LastStartTime             string                 `json:"last_start_time,omitempty"`
 		LastStartTimeUnix         int64                  `json:"last_start_time_unix,omitempty"`
+		LastEndTime               string                 `json:"last_end_time,omitempty"`
+		LastEndTimeUnix           int64                  `json:"last_end_time_unix,omitempty"`
 		AudioOnly                 bool                   `json:"audio_only"`
 		NickName                  string                 `json:"nick_name"`
 		LastError                 string                 `json:"last_error,omitempty"`
 		AvailableStreams          []*AvailableStreamInfo `json:"available_streams,omitempty"`
 		AvailableStreamsUpdatedAt int64                  `json:"available_streams_updated_at,omitempty"`
+		AutoRecord                bool                   `json:"auto_record"`
 	}{
 		Id:                        i.Live.GetLiveId(),
 		LiveUrl:                   i.Live.GetRawUrl(),
@@ -109,10 +113,15 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		LastError:                 i.LastError,
 		AvailableStreams:          i.AvailableStreams,
 		AvailableStreamsUpdatedAt: i.AvailableStreamsUpdatedAt,
+		AutoRecord:                i.AutoRecord,
 	}
 	if !i.Live.GetLastStartTime().IsZero() {
 		t.LastStartTime = i.Live.GetLastStartTime().Format("2006-01-02 15:04:05")
 		t.LastStartTimeUnix = i.Live.GetLastStartTime().Unix()
+	}
+	if !i.Live.GetLastEndTime().IsZero() {
+		t.LastEndTime = i.Live.GetLastEndTime().Format("2006-01-02 15:04:05")
+		t.LastEndTimeUnix = i.Live.GetLastEndTime().Unix()
 	}
 	return json.Marshal(t)
 }

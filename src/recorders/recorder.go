@@ -369,6 +369,13 @@ func (r *recorder) tryRecord(ctx context.Context) {
 	// 使用层级配置的下载器类型
 	downloaderType := resolvedConfig.Feature.GetEffectiveDownloaderType()
 
+	// 如果配置了保存为 TS，且下载器是 ffmpeg，且原本是 flv 视频，我们将输出后缀名改为 .ts
+	if resolvedConfig.Feature.SaveAsTS && downloaderType == configs.DownloaderFFmpeg && strings.HasSuffix(strings.ToLower(fileName), ".flv") {
+		if !info.AudioOnly {
+			fileName = fileName[:strings.LastIndex(fileName, ".")] + ".ts"
+		}
+	}
+
 	// 如果启用了 FLV 代理分段且使用 FFmpeg 下载器，传递配置
 	if resolvedConfig.Feature.EnableFlvProxySegment && downloaderType == configs.DownloaderFFmpeg {
 		parserCfg["use_flv_proxy"] = "true"
@@ -701,6 +708,40 @@ func (r *recorder) tryRecord(ctx context.Context) {
 		// 将旧配置转换为 Pipeline 配置
 		pipelineConfig := pipeline.GetEffectivePipelineConfig(&resolvedConfig.OnRecordFinished)
 
+		// 如果配置了保存为 TS，且产出的文件中有 flv 格式（通常是使用了不支持直接写 ts 的下载器）
+		// 我们动态在 Pipeline 任务中加入 convert_ts 阶段
+		if resolvedConfig.Feature.SaveAsTS {
+			hasFlv := false
+			for _, file := range outputFiles {
+				if strings.HasSuffix(strings.ToLower(file), ".flv") {
+					hasFlv = true
+					break
+				}
+			}
+			if hasFlv {
+				tsStage := pipeline.StageConfig{
+					Name:    pipeline.StageNameConvertTs,
+					Enabled: pipeline.EnabledPtr(true),
+					Options: map[string]interface{}{
+						pipeline.OptionDeleteSource: true,
+					},
+				}
+				inserted := false
+				for idx, stage := range pipelineConfig.Stages {
+					if stage.Name == pipeline.StageNameFixFlv {
+						// 插入在 fix_flv 后面
+						pipelineConfig.Stages = append(pipelineConfig.Stages[:idx+1], append([]pipeline.StageConfig{tsStage}, pipelineConfig.Stages[idx+1:]...)...)
+						inserted = true
+						break
+					}
+				}
+				if !inserted {
+					// 插入在最前面
+					pipelineConfig.Stages = append([]pipeline.StageConfig{tsStage}, pipelineConfig.Stages...)
+				}
+			}
+		}
+
 		// 如果没有配置任何处理阶段，跳过
 		if len(pipelineConfig.Stages) == 0 {
 			r.getLogger().Debug("no pipeline stages configured, skipping post-processing")
@@ -989,6 +1030,9 @@ func (r *recorder) setAndCloseParser(p parser.Parser) {
 		}
 	}
 	r.parser = p
+	if atomic.LoadUint32(&r.state) == stopped && p != nil {
+		p.Stop()
+	}
 }
 
 func (r *recorder) Start(ctx context.Context) error {
@@ -1015,15 +1059,57 @@ func (r *recorder) IsRecording() bool {
 	if filePath == "" {
 		return false
 	}
+
+	// 1. 先尝试获取 parser 状态，优先使用 parser 的真实写入统计
+	if statusP, ok := r.getParser().(parser.StatusParser); ok {
+		if status, err := statusP.Status(); err == nil && status != nil {
+			if sizeStr, ok := status["total_size"].(string); ok {
+				if size, _ := strconv.ParseInt(sizeStr, 10, 64); size > 0 {
+					return true
+				}
+			}
+			if timeStr, ok := status["out_time_us"].(string); ok {
+				if t, _ := strconv.ParseInt(timeStr, 10, 64); t > 0 {
+					return true
+				}
+			}
+			if frameStr, ok := status["frame"].(string); ok {
+				if f, _ := strconv.ParseInt(strings.TrimSpace(frameStr), 10, 64); f > 0 {
+					return true
+				}
+			}
+		}
+	}
+
+	// 2. 回退到文件系统检查（注意 Windows 上的文件大小缓存问题）
 	if fileInfo, err := os.Stat(filePath); err == nil {
-		return fileInfo.Size() > 0
+		if fileInfo.Size() > 0 {
+			return true
+		}
+		// 如果文件存在且是在 Windows 上，os.Stat 返回 0 可能是因为系统缓存
+		// 尝试通过 os.Open 获取真实大小（要求其他进程支持 FILE_SHARE_READ）
+		if runtime.GOOS == "windows" {
+			if f, err := os.Open(filePath); err == nil {
+				if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
+					f.Close()
+					return true
+				}
+				f.Close()
+			}
+		}
 	}
 	return false
 }
 
 func (r *recorder) Close() {
-	if !atomic.CompareAndSwapUint32(&r.state, running, stopped) {
-		return
+	for {
+		state := atomic.LoadUint32(&r.state)
+		if state == stopped {
+			return
+		}
+		if atomic.CompareAndSwapUint32(&r.state, state, stopped) {
+			break
+		}
 	}
 	close(r.stop)
 	if p := r.getParser(); p != nil {

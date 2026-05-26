@@ -156,6 +156,9 @@ func DecorateConfigNode(node *yaml.Node) {
 # 当检测到视频编码参数变化（新的 SPS/PPS）时，会主动断开连接触发 FFmpeg 分段
 # 这可以避免因编码参数变化导致的花屏问题
 # 注意：启用后会在本地启动一个 FLV 代理服务器，FFmpeg 从代理读取流`, "")
+		setFieldComment(featureNode, "save_as_ts",
+			`# 是否自动将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
+# 默认启用，如需关闭请设置为 false`, "")
 	}
 }
 

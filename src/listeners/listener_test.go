@@ -72,6 +72,7 @@ func TestRefresh(t *testing.T) {
 
 	// true -> false
 	live.EXPECT().GetInfo().Return(&livepkg.Info{Status: false}, nil)
+	live.EXPECT().SetLastEndTime(gomock.Any())
 	live.EXPECT().GetRawUrl().Return("").AnyTimes() // 添加对GetRawUrl方法的期望调用
 	live.EXPECT().GetPlatformCNName().Return("platform").AnyTimes()
 	ed.EXPECT().DispatchEvent(events.NewEvent(LiveEnd, live))

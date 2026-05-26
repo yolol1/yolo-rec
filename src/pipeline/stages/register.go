@@ -11,6 +11,9 @@ func RegisterBuiltinStages(executor *pipeline.Executor) {
 	// MP4 转换
 	executor.RegisterStage(pipeline.StageNameConvertMp4, NewConvertMp4Stage)
 
+	// TS 转换 (Remuxing)
+	executor.RegisterStage(pipeline.StageNameConvertTs, NewConvertTsStage)
+
 	// 弹幕字幕烧录
 	executor.RegisterStage(pipeline.StageNameBurnSubtitles, NewBurnSubtitlesStage)
 
@@ -37,6 +40,9 @@ func RegisterBuiltinStagesToManager(manager *pipeline.Manager) {
 
 	// MP4 转换
 	manager.RegisterStage(pipeline.StageNameConvertMp4, NewConvertMp4Stage)
+
+	// TS 转换 (Remuxing)
+	manager.RegisterStage(pipeline.StageNameConvertTs, NewConvertTsStage)
 
 	// 弹幕字幕烧录
 	manager.RegisterStage(pipeline.StageNameBurnSubtitles, NewBurnSubtitlesStage)

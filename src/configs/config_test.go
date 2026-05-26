@@ -289,3 +289,34 @@ func intPtr(i int) *int {
 func stringPtr(s string) *string {
 	return &s
 }
+
+func TestSaveAsTSConfig(t *testing.T) {
+	// 验证默认的 Feature.SaveAsTS 是否为 true
+	cfg := NewConfig()
+	assert.True(t, cfg.Feature.SaveAsTS)
+
+	// 验证从旧配置加载时未定义 save_as_ts 时默认也应当为 true
+	oldConfigYaml := `
+rpc:
+  enable: true
+interval: 30
+feature:
+  downloader_type: ffmpeg
+`
+	cfg, err := NewConfigWithBytes([]byte(oldConfigYaml))
+	assert.NoError(t, err)
+	assert.True(t, cfg.Feature.SaveAsTS)
+
+	// 验证显式设置为 false 时的情况
+	explicitFalseYaml := `
+rpc:
+  enable: true
+interval: 30
+feature:
+  downloader_type: ffmpeg
+  save_as_ts: false
+`
+	cfg, err = NewConfigWithBytes([]byte(explicitFalseYaml))
+	assert.NoError(t, err)
+	assert.False(t, cfg.Feature.SaveAsTS)
+}

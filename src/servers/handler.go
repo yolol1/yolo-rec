@@ -41,7 +41,7 @@ import (
 )
 
 // FIXME: remove this
-func parseInfo(ctx context.Context, l live.Live) *live.Info {
+func parseInfo(ctx context.Context, l live.Live, preFetchedRoom ...*livestate.LiveRoom) *live.Info {
 	inst := instance.GetInstance(ctx)
 
 	// 尝试从缓存获取信息
@@ -59,7 +59,10 @@ func parseInfo(ctx context.Context, l live.Live) *live.Info {
 			Initializing: true,
 		}
 	} else {
-		info = obj.(*live.Info)
+		// 浅拷贝，避免修改缓存中的共享对象导致并发渲染或状态冲突问题
+		cachedInfo := obj.(*live.Info)
+		infoCopy := *cachedInfo
+		info = &infoCopy
 	}
 
 	info.Listening = inst.ListenerManager.(listeners.Manager).HasListener(ctx, l.GetLiveId())
@@ -80,6 +83,35 @@ func parseInfo(ctx context.Context, l live.Live) *live.Info {
 			info.RecordingPreparing = true
 		}
 	}
+
+	// 尝试从数据库同步历史数据（关播时间、主播名称、直播间名称）
+	if store, ok := inst.LiveStateStore.(livestate.Store); ok && store != nil {
+		var dbRoom *livestate.LiveRoom
+		if len(preFetchedRoom) > 0 {
+			dbRoom = preFetchedRoom[0]
+		} else {
+			dbRoom, _ = store.GetLiveRoom(ctx, string(l.GetLiveId()))
+		}
+		
+		if dbRoom != nil {
+			if l.GetLastEndTime().IsZero() && !dbRoom.LastEndTime.IsZero() {
+				l.SetLastEndTime(dbRoom.LastEndTime)
+			}
+			if info.HostName == "" && dbRoom.HostName != "" {
+				info.HostName = dbRoom.HostName
+			}
+			if info.RoomName == "" && dbRoom.RoomName != "" {
+				info.RoomName = dbRoom.RoomName
+			}
+		}
+	}
+
+	if cfg := configs.GetCurrentConfig(); cfg != nil {
+		if room, err := cfg.GetLiveRoomByUrl(l.GetRawUrl()); err == nil {
+			info.AutoRecord = room.IsAutoRecord()
+		}
+	}
+
 	if info.HostName == "" {
 		info.HostName = "获取失败"
 	}
@@ -108,9 +140,21 @@ func extractStreamAttributeCombinations(streams []*live.AvailableStreamInfo) []m
 
 func getAllLives(writer http.ResponseWriter, r *http.Request) {
 	inst := instance.GetInstance(r.Context())
+
+	// 预先获取所有的 DB room 信息，避免 N+1 查询
+	var allRooms []*livestate.LiveRoom
+	if store, ok := inst.LiveStateStore.(livestate.Store); ok && store != nil {
+		allRooms, _ = store.GetAllLiveRooms(r.Context())
+	}
+	dbRoomsMap := make(map[string]*livestate.LiveRoom)
+	for _, dbRoom := range allRooms {
+		dbRoomsMap[dbRoom.LiveID] = dbRoom
+	}
+
 	lives := liveSlice(make([]*live.Info, 0, 4))
 	inst.Lives.Range(func(_ types.LiveID, v live.Live) bool {
-		lives = append(lives, parseInfo(r.Context(), v))
+		dbRoom := dbRoomsMap[string(v.GetLiveId())]
+		lives = append(lives, parseInfo(r.Context(), v, dbRoom))
 		return true
 	})
 	sort.Sort(lives)
@@ -452,6 +496,81 @@ func parseLiveAction(writer http.ResponseWriter, r *http.Request) {
 		}
 		// 广播监控停止事件
 		GetSSEHub().BroadcastListChange(live.GetLiveId(), "listen_stop", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "start-recording":
+		// 检查监听状态
+		isListening := inst.ListenerManager.(listeners.Manager).HasListener(inst.Ctx, live.GetLiveId())
+		if !isListening {
+			resp.ErrNo = http.StatusBadRequest
+			resp.ErrMsg = "直播间未开启监控，请先开启监控"
+			writeJsonWithStatusCode(writer, http.StatusBadRequest, resp)
+			return
+		}
+		// 检查开播状态
+		info := parseInfo(r.Context(), live)
+		if !info.Status {
+			resp.ErrNo = http.StatusBadRequest
+			resp.ErrMsg = "主播未开播，无法开始录制"
+			writeJsonWithStatusCode(writer, http.StatusBadRequest, resp)
+			return
+		}
+		// 检查录制状态
+		recorderMgr := inst.RecorderManager.(recorders.Manager)
+		if recorderMgr.HasRecorder(inst.Ctx, live.GetLiveId()) {
+			resp.ErrNo = http.StatusBadRequest
+			resp.ErrMsg = "直播间已在录制或准备录制中"
+			writeJsonWithStatusCode(writer, http.StatusBadRequest, resp)
+			return
+		}
+		// 开始录制
+		if err := recorderMgr.AddRecorder(inst.Ctx, live); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("开启录制失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		// 广播事件
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "record_start", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "stop-recording":
+		recorderMgr := inst.RecorderManager.(recorders.Manager)
+		if !recorderMgr.HasRecorder(inst.Ctx, live.GetLiveId()) {
+			resp.ErrNo = http.StatusBadRequest
+			resp.ErrMsg = "直播间当前未在录制"
+			writeJsonWithStatusCode(writer, http.StatusBadRequest, resp)
+			return
+		}
+		// 停止录制
+		if err := recorderMgr.RemoveRecorder(inst.Ctx, live.GetLiveId()); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("停止录制失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		// 广播事件
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "record_stop", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "enable-auto-record":
+		if _, err := configs.SetLiveRoomAutoRecord(live.GetRawUrl(), true); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("设置自动录制失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "auto_record_enable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "disable-auto-record":
+		if _, err := configs.SetLiveRoomAutoRecord(live.GetRawUrl(), false); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("设置自动录制失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "auto_record_disable", map[string]interface{}{
 			"live_id": string(live.GetLiveId()),
 		})
 	case "forceRefresh":
@@ -1009,6 +1128,9 @@ func getPlatformStats(writer http.ResponseWriter, r *http.Request) {
 					roomInfo["host_name"] = info.HostName
 					roomInfo["room_name"] = info.RoomName
 					roomInfo["status"] = info.Status
+					roomInfo["recording"] = info.Recording
+					roomInfo["recording_preparing"] = info.RecordingPreparing
+					roomInfo["initializing"] = info.Initializing
 				}
 			}
 		}
@@ -1259,6 +1381,8 @@ func (m *mockLiveForPreview) Close()                                         {}
 func (m *mockLiveForPreview) GetStreamInfos() ([]*live.StreamUrlInfo, error) { return nil, nil }
 func (m *mockLiveForPreview) GetLastStartTime() time.Time                    { return time.Time{} }
 func (m *mockLiveForPreview) SetLastStartTime(time.Time)                     {}
+func (m *mockLiveForPreview) GetLastEndTime() time.Time                      { return time.Time{} }
+func (m *mockLiveForPreview) SetLastEndTime(time.Time)                       {}
 func (m *mockLiveForPreview) UpdateLiveOptionsbyConfig(ctx context.Context, room *configs.LiveRoom) error {
 	return nil
 }
@@ -1431,6 +1555,9 @@ func applyConfigUpdates(c *configs.Config, updates map[string]interface{}) error
 		}
 		if removeSymbolOther, ok := feature["remove_symbol_other_character"].(bool); ok {
 			c.Feature.RemoveSymbolOtherCharacter = removeSymbolOther
+		}
+		if saveAsTS, ok := feature["save_as_ts"].(bool); ok {
+			c.Feature.SaveAsTS = saveAsTS
 		}
 	}
 
@@ -1837,6 +1964,9 @@ func applyOverridableConfigUpdates(oc *configs.OverridableConfig, updates map[st
 		}
 		if enableFlvProxySegment, ok := feature["enable_flv_proxy_segment"].(bool); ok {
 			oc.Feature.EnableFlvProxySegment = enableFlvProxySegment
+		}
+		if saveAsTS, ok := feature["save_as_ts"].(bool); ok {
+			oc.Feature.SaveAsTS = saveAsTS
 		}
 	}
 

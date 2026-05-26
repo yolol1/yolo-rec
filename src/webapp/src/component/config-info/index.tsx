@@ -135,6 +135,7 @@ interface EffectiveConfig {
     downloader_type?: DownloaderType;
     use_native_flv_parser?: boolean; // 已废弃，保留用于向后兼容
     remove_symbol_other_character: boolean;
+    save_as_ts?: boolean;
   };
   out_put_tmpl: string;
   default_out_put_tmpl: string;
@@ -627,6 +628,11 @@ const GlobalSettings: React.FC<{
           </ConfigField>
           <ConfigField label="移除特殊字符" description="从文件名中移除特殊字符">
             <Form.Item name={['feature', 'remove_symbol_other_character']} valuePropName="checked" noStyle>
+              <Switch />
+            </Form.Item>
+          </ConfigField>
+          <ConfigField label="保存为 TS 格式" description="自动将录制视频转封装为 TS 格式以解决播放拖动卡顿问题">
+            <Form.Item name={['feature', 'save_as_ts']} valuePropName="checked" noStyle>
               <Switch />
             </Form.Item>
           </ConfigField>
@@ -1622,8 +1628,8 @@ const PlatformConfigForm: React.FC<{
                   <span className="room-list-item-url">{room.url}</span>
                 </div>
                 <Space>
-                  <Tag color={room.is_listening ? 'green' : 'default'}>
-                    {room.is_listening ? '监控中' : '已停止'}
+                  <Tag color={room.initializing ? 'orange' : room.recording ? 'red' : room.recording_preparing ? 'volcano' : room.is_listening ? (room.status ? 'green' : 'blue') : 'default'}>
+                    {room.initializing ? '初始化' : room.recording ? '录制中' : room.recording_preparing ? '录制准备中' : room.is_listening ? (room.status ? '直播中' : '监控中') : '已停止'}
                   </Tag>
                   {room.live_id && (
                     <Tooltip title="跳转到直播间设置页并展开此直播间">
@@ -2062,7 +2068,7 @@ const RoomSettings: React.FC<{
                 <Space>
                   <span style={{ fontWeight: 600 }}>{room.nick_name || room.host_name || '未知主播'}</span>
                   <Tag>{room.platform_name}</Tag>
-                  <Tag color={room.is_listening ? 'green' : 'default'}>{room.is_listening ? '监控中' : '已停止'}</Tag>
+                  <Tag color={room.initializing ? 'orange' : room.recording ? 'red' : room.recording_preparing ? 'volcano' : room.is_listening ? (room.status ? 'green' : 'blue') : 'default'}>{room.initializing ? '初始化' : room.recording ? '录制中' : room.recording_preparing ? '录制准备中' : room.is_listening ? (room.status ? '直播中' : '监控中') : '已停止'}</Tag>
                 </Space>
                 <span style={{ fontSize: 12, color: '#999' }}>{room.url}</span>
               </div>

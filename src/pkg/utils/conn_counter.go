@@ -136,33 +136,9 @@ func (m *ConnCounterManagerType) GetStatsByHostPrefix(prefix string) []ConnStats
 var edgesrvWarningOnce sync.Once
 
 // createTLSConfig creates a TLS configuration for the given host
-// For edgesrv.com domains, it enables weak TLS 1.2 cipher suites for compatibility
+// For edgesrv.com domains, we may need specific configurations in the future,
+// but for now we use default secure configuration to avoid 500 errors on BWS/WAF.
 func createTLSConfig(host string) *tls.Config {
-	if strings.HasSuffix(host, ".edgesrv.com") || host == "edgesrv.com" {
-		// Log warning only once to avoid log spam
-		edgesrvWarningOnce.Do(func() {
-			blog.GetLogger().Warnf("Enabling weak TLS 1.2 cipher suites for edgesrv.com domains. This may reduce connection security for these specific domains.")
-		})
-
-		// Enable weak TLS 1.2 cipher suites for edgesrv.com
-		// Based on SSL Labs report, edgesrv.com servers require CBC-mode RSA cipher suites
-		return &tls.Config{
-			ServerName: host,
-			MinVersion: tls.VersionTLS12,
-			CipherSuites: []uint16{
-				// Standard secure ciphers first (prefer ECDHE for forward secrecy)
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-				// Weak CBC-mode RSA cipher suites for compatibility with edgesrv.com
-				tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-				tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
-			},
-		}
-	}
-	// For other domains, use default secure configuration
 	return &tls.Config{
 		ServerName: host,
 	}

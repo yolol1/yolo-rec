@@ -88,6 +88,20 @@ func (mr *MockLiveMockRecorder) GetInfoWithInterval(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInfoWithInterval", reflect.TypeOf((*MockLive)(nil).GetInfoWithInterval), ctx)
 }
 
+// GetLastEndTime mocks base method.
+func (m *MockLive) GetLastEndTime() time.Time {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLastEndTime")
+	ret0, _ := ret[0].(time.Time)
+	return ret0
+}
+
+// GetLastEndTime indicates an expected call of GetLastEndTime.
+func (mr *MockLiveMockRecorder) GetLastEndTime() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLastEndTime", reflect.TypeOf((*MockLive)(nil).GetLastEndTime))
+}
+
 // GetLastStartTime mocks base method.
 func (m *MockLive) GetLastStartTime() time.Time {
 	m.ctrl.T.Helper()
@@ -200,6 +214,18 @@ func (m *MockLive) GetStreamUrls() ([]*url.URL, error) {
 func (mr *MockLiveMockRecorder) GetStreamUrls() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStreamUrls", reflect.TypeOf((*MockLive)(nil).GetStreamUrls))
+}
+
+// SetLastEndTime mocks base method.
+func (m *MockLive) SetLastEndTime(arg0 time.Time) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLastEndTime", arg0)
+}
+
+// SetLastEndTime indicates an expected call of SetLastEndTime.
+func (mr *MockLiveMockRecorder) SetLastEndTime(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLastEndTime", reflect.TypeOf((*MockLive)(nil).SetLastEndTime), arg0)
 }
 
 // SetLastStartTime mocks base method.

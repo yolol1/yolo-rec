@@ -61,8 +61,10 @@ func (l *listener) Start() error {
 	defer atomic.CompareAndSwapUint32(&l.state, pending, running)
 
 	l.ed.DispatchEvent(events.NewEvent(ListenStart, l.Live))
-	l.refresh()
-	bilisentry.Go(func() { l.run() })
+	bilisentry.Go(func() {
+		l.refresh() // 移入后台执行，避免阻塞调用方（特别是 AddListener 持有的写锁）
+		l.run()
+	})
 	return nil
 }
 
@@ -157,6 +159,7 @@ func (l *listener) processInfo(info *live.Info) {
 		l.sendLiveNotification(hostName, consts.LiveStatusStart)
 
 	case statusToFalseEvt:
+		l.Live.SetLastEndTime(time.Now())
 		evtTyp = LiveEnd
 		logInfo = "Live end"
 		// 发送结束直播提醒和录像通知

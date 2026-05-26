@@ -206,6 +206,8 @@ type Live interface {
 	GetPlatformCNName() string
 	GetLastStartTime() time.Time
 	SetLastStartTime(time.Time)
+	GetLastEndTime() time.Time
+	SetLastEndTime(time.Time)
 	UpdateLiveOptionsbyConfig(context.Context, *configs.LiveRoom) error
 	GetOptions() *Options
 	GetLogger() *livelogger.LiveLogger

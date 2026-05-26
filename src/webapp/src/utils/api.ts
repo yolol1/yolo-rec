@@ -65,6 +65,38 @@ class API {
     }
 
     /**
+     * 手动开始录制
+     * @param id 直播间id
+     */
+    startRecording(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/start-recording`);
+    }
+
+    /**
+     * 手动停止录制
+     * @param id 直播间id
+     */
+    stopRecording(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/stop-recording`);
+    }
+
+    /**
+     * 启用自动录制
+     * @param id 直播间id
+     */
+    enableAutoRecord(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/enable-auto-record`);
+    }
+
+    /**
+     * 禁用自动录制
+     * @param id 直播间id
+     */
+    disableAutoRecord(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/disable-auto-record`);
+    }
+
+    /**
      * 保存设置至config文件
      */
     saveSettings() {

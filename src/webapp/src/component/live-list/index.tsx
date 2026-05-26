@@ -1,6 +1,6 @@
 import React from "react";
 import { Button, Divider, Table, Tag, Tabs, Row, Col, Tooltip, message, List, Typography, Switch, Space, Popconfirm, Select } from 'antd';
-import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined, VideoCameraOutlined, VideoCameraAddOutlined, DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import PopDialog from '../pop-dialog/index';
 import AddRoomDialog from '../add-room-dialog/index';
 import LogPanel from '../log-panel/index';
@@ -324,6 +324,9 @@ interface ItemData {
     tags: string[],
     listening: boolean
     roomId: string
+    lastEndTime?: string
+    isLiving: boolean
+    autoRecord: boolean
 }
 interface CookieItemData {
     Platform_cn_name: string,
@@ -362,6 +365,9 @@ class LiveList extends React.Component<Props, IState> {
                         color = 'grey';
                     }
                     if (tag === '监控中') {
+                        color = 'blue';
+                    }
+                    if (tag === '直播中') {
                         color = 'green';
                     }
                     if (tag === '录制中') {
@@ -383,80 +389,127 @@ class LiveList extends React.Component<Props, IState> {
             </span>
         ),
         sorter: (a: ItemData, b: ItemData) => {
-            // 录制中 > 录制准备中 > 其他
             const getRecordingPriority = (tags: string[]) => {
-                if (tags.includes('录制中')) return 2;
-                if (tags.includes('录制准备中')) return 1;
-                return 0;
+                if (tags.includes('录制中')) return 1;
+                if (tags.includes('录制准备中')) return 2;
+                if (tags.includes('直播中')) return 3;
+                if (tags.includes('监控中')) return 4;
+                if (tags.includes('初始化')) return 5;
+                if (tags.includes('已停止')) return 6;
+                return 7;
             };
-            return getRecordingPriority(a.tags) - getRecordingPriority(b.tags);
+            const diff = getRecordingPriority(a.tags) - getRecordingPriority(b.tags);
+            if (diff !== 0) return diff;
+            return a.roomId.localeCompare(b.roomId);
         },
-        defaultSortOrder: 'descend',
     };
 
     runAction: ColumnsType<ItemData>[number] = {
         title: '操作',
         key: 'action',
         dataIndex: 'listening',
-        render: (listening: boolean, data: ItemData) => (
-            <span onClick={(e) => e.stopPropagation()}>
-                <PopDialog
-                    title={listening ? "确定停止监控？" : "确定开启监控？"}
-                    onConfirm={(e) => {
-                        if (listening) {
-                            //停止监控
-                            api.stopRecord(data.roomId)
+        render: (listening: boolean, data: ItemData) => {
+            const isRecording = data.tags.includes('录制中') || data.tags.includes('录制准备中');
+            return (
+                <Space size="middle" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    <Tooltip title={listening ? "停止监控" : "开启监控"}>
+                        <Switch
+                            checkedChildren="监控"
+                            unCheckedChildren="监控"
+                            checked={listening}
+                            onChange={(checked, e) => {
+                                e.stopPropagation();
+                                if (!checked) {
+                                    api.stopRecord(data.roomId)
+                                        .then(rsp => {
+                                            api.saveSettingsInBackground();
+                                            this.refresh();
+                                        })
+                                        .catch(err => alert(`停止监控失败:\n${err}`));
+                                } else {
+                                    api.startRecord(data.roomId)
+                                        .then(rsp => {
+                                            api.saveSettingsInBackground();
+                                            this.refresh();
+                                        })
+                                        .catch(err => alert(`开启监控失败:\n${err}`));
+                                }
+                            }}
+                        />
+                    </Tooltip>
+
+                    {listening && (
+                        <>
+                            <Tooltip title={data.autoRecord ? "关闭自动录制" : "开启自动录制"}>
+                                <Switch
+                                    checkedChildren="自动录制"
+                                    unCheckedChildren="自动录制"
+                                    checked={data.autoRecord}
+                                    onChange={(checked, e) => {
+                                        e.stopPropagation();
+                                        if (!checked) {
+                                            api.disableAutoRecord(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`关闭自动录制失败:\n${err}`));
+                                        } else {
+                                            api.enableAutoRecord(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`开启自动录制失败:\n${err}`));
+                                        }
+                                    }}
+                                />
+                            </Tooltip>
+
+                            {data.isLiving && (
+                                <PopDialog
+                                    title={isRecording ? "确定停止当前录制？(继续保持监控)" : "确定开始录制直播流？"}
+                                    onConfirm={(e) => {
+                                        if (isRecording) {
+                                            api.stopRecording(data.roomId)
+                                                .then(rsp => this.refresh())
+                                                .catch(err => alert(`停止录制失败:\n${err}`));
+                                        } else {
+                                            api.startRecording(data.roomId)
+                                                .then(rsp => this.refresh())
+                                                .catch(err => alert(`开启录制失败:\n${err}`));
+                                        }
+                                    }}>
+                                    <Button type={isRecording ? "default" : "primary"} danger={isRecording} size="small" shape="round" icon={isRecording ? <VideoCameraOutlined /> : <VideoCameraAddOutlined />}>
+                                        {isRecording ? "停止录制" : "手动录制"}
+                                    </Button>
+                                </PopDialog>
+                            )}
+                        </>
+                    )}
+
+                    <PopDialog title="确定删除当前直播间？"
+                        onConfirm={(e) => {
+                            api.deleteRoom(data.roomId)
                                 .then(rsp => {
                                     api.saveSettingsInBackground();
                                     this.refresh();
                                 })
-                                .catch(err => {
-                                    alert(`停止监控失败:\n${err}`);
-                                });
-                        } else {
-                            //开启监控
-                            api.startRecord(data.roomId)
-                                .then(rsp => {
-                                    api.saveSettingsInBackground();
-                                    this.refresh();
-                                })
-                                .catch(err => {
-                                    alert(`开启监控失败:\n${err}`);
-                                });
-                        }
-                    }}>
-                    <Button type="link" size="small">{listening ? "停止监控" : "开启监控"}</Button>
-                </PopDialog>
-                <Divider type="vertical" />
-                <PopDialog title="确定删除当前直播间？"
-                    onConfirm={(e) => {
-                        api.deleteRoom(data.roomId)
-                            .then(rsp => {
-                                api.saveSettingsInBackground();
-                                this.refresh();
-                            })
-                            .catch(err => {
-                                alert(`删除直播间失败:\n${err}`);
-                            });
-                    }}>
-                    <Button type="link" size="small">删除</Button>
-                </PopDialog>
-                <Divider type="vertical" />
-                <Button type="link" size="small" onClick={(e) => {
-                    this.props.navigate(`/fileList/${data.address}/${data.name}`);
-                }}>文件</Button>
-                <Divider type="vertical" />
-                <a
-                    href={`/#/configInfo#rooms-live-${data.roomId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ fontSize: 12 }}
-                >
-                    配置
-                </a>
-            </span>
-        ),
+                                .catch(err => alert(`删除直播间失败:\n${err}`));
+                        }}>
+                        <Tooltip title="删除直播间">
+                            <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+                        </Tooltip>
+                    </PopDialog>
+
+                    <Tooltip title="打开录制文件目录">
+                        <Button type="text" size="small" icon={<FolderOpenOutlined />} onClick={(e) => {
+                            this.props.navigate(`/fileList/${data.address}/${data.name}`);
+                        }} />
+                    </Tooltip>
+                </Space>
+            );
+        }
     };
 
     columns: ColumnsType<ItemData> = [
@@ -549,7 +602,7 @@ class LiveList extends React.Component<Props, IState> {
     constructor(props: Props) {
         super(props);
         // 从 localStorage 加载排序状态
-        let savedSortedInfo = { columnKey: null as string | null, order: null as 'ascend' | 'descend' | null };
+        let savedSortedInfo = { columnKey: 'tags', order: 'ascend' as 'ascend' | 'descend' | null };
         try {
             const saved = localStorage.getItem('liveListSortedInfo');
             if (saved) {
@@ -887,21 +940,21 @@ class LiveList extends React.Component<Props, IState> {
                 }
                 return rsp.map((item: any, index: number) => {
                     //判断标签状态
-                    let tags;
-                    if (item.listening === true) {
-                        tags = ['监控中'];
-                    } else {
-                        tags = ['已停止'];
-                    }
-
-                    if (item.recording === true) {
-                        tags = ['录制中'];
-                    } else if (item.recording_preparing === true) {
-                        tags = ['录制准备中'];
-                    }
-
+                    let tags = [];
                     if (item.initializing === true) {
-                        tags.push('初始化')
+                        tags.push('初始化');
+                    } else if (item.recording === true) {
+                        tags.push('录制中');
+                    } else if (item.recording_preparing === true) {
+                        tags.push('录制准备中');
+                    } else if (item.listening === true) {
+                        if (item.status === true) {
+                            tags.push('直播中');
+                        } else {
+                            tags.push('监控中');
+                        }
+                    } else {
+                        tags.push('已停止');
                     }
 
                     return {
@@ -915,7 +968,10 @@ class LiveList extends React.Component<Props, IState> {
                         address: item.platform_cn_name,
                         tags,
                         listening: item.listening,
-                        roomId: item.id
+                        roomId: item.id,
+                        lastEndTime: item.last_end_time,
+                        isLiving: item.status,
+                        autoRecord: item.auto_record
                     };
                 });
             })
@@ -1436,8 +1492,8 @@ class LiveList extends React.Component<Props, IState> {
                             <div style={{ padding: '4px 0' }}>
                                 <div style={configRowStyle}>
                                     <span style={configLabelStyle}>监控状态</span>
-                                    <Tag color={detail.listening ? 'green' : undefined}>
-                                        {detail.listening ? '监控中' : '已停止'}
+                                    <Tag color={detail.listening ? (detail.status ? 'green' : 'blue') : undefined}>
+                                        {detail.listening ? (detail.status ? '直播中' : '监控中') : '已停止'}
                                     </Tag>
                                 </div>
                                 <div style={configRowStyle}>
@@ -1893,7 +1949,7 @@ class LiveList extends React.Component<Props, IState> {
                 column.onFilter = (value: string | number | boolean, record: ItemData) => record.address === value;
             }
             if (column.key === 'tags') {
-                column.filters = ['初始化', '监控中', '录制中', '录制准备中', '已停止'].map(text => ({ text, value: text }));
+                column.filters = ['初始化', '监控中', '直播中', '录制中', '录制准备中', '已停止'].map(text => ({ text, value: text }));
                 column.onFilter = (value: string | number | boolean, record: ItemData) => record.tags.includes(value as string);
             }
         })

@@ -28,24 +28,22 @@ func testRoom(roomUrl string) {
 		return
 	}
 
-	// Unwrap WrappedLive if necessary
 	var douyuLive debugLive
-	if _, ok := liveObj.(interface{ GetOptions() *live.Options }); ok {
-		// A trick to bypass package visibility or directly access it:
-		// Since WrappedLive is in pkg live, let's cast liveObj.
-		// Actually WrappedLive is exported, so we can cast to *live.WrappedLive.
+	
+	// Unwrap live.WrappedLive
+	for {
 		if wl, ok := liveObj.(*live.WrappedLive); ok {
-			douyuLive, ok = wl.Live.(debugLive)
+			liveObj = wl.Live
+		} else {
+			break
 		}
 	}
-	
-	if douyuLive == nil {
-		var ok bool
-		douyuLive, ok = liveObj.(debugLive)
-		if !ok {
-			fmt.Println("Failed to cast liveObj to debugLive")
-			return
-		}
+
+	if dl, ok := liveObj.(debugLive); ok {
+		douyuLive = dl
+	} else {
+		fmt.Printf("Failed to cast liveObj (%T) to debugLive\n", liveObj)
+		return
 	}
 
 	baseParams, err := douyuLive.DebugGetSignParams()

@@ -60,6 +60,9 @@ type Feature struct {
 	// 当检测到视频编码参数变化（新的 SPS/PPS）时，会主动断开连接触发 FFmpeg 分段
 	// 这可以避免因编码参数变化导致的花屏问题
 	EnableFlvProxySegment bool `yaml:"enable_flv_proxy_segment,omitempty" json:"enable_flv_proxy_segment,omitempty"`
+
+	// SaveAsTS 是否将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
+	SaveAsTS bool `yaml:"save_as_ts" json:"save_as_ts"`
 }
 
 // GetEffectiveDownloaderType 获取实际生效的下载器类型
@@ -759,6 +762,16 @@ func SetLiveRoomListening(url string, listening bool) (*Config, error) {
 	}, 3, 10*time.Millisecond)
 }
 
+// SetLiveRoomAutoRecord 设置指定 URL 的房间自动录制状态
+func SetLiveRoomAutoRecord(url string, autoRecord bool) (*Config, error) {
+	return UpdateWithRetry(func(c *Config) error {
+		if room, err := c.GetLiveRoomByUrl(url); err == nil {
+			room.AutoRecord = &autoRecord
+		}
+		return nil
+	}, 3, 10*time.Millisecond)
+}
+
 // SetLiveRoomId 设置指定 URL 的房间的 LiveId
 // LiveId 不持久化，因此使用 Transient 更新
 func SetLiveRoomId(url string, id types.LiveID) (*Config, error) {
@@ -773,6 +786,7 @@ func SetLiveRoomId(url string, id types.LiveID) (*Config, error) {
 type LiveRoom struct {
 	Url         string       `yaml:"url" json:"url"`
 	IsListening bool         `yaml:"is_listening" json:"is_listening"`
+	AutoRecord  *bool        `yaml:"auto_record,omitempty" json:"auto_record,omitempty"`
 	LiveId      types.LiveID `yaml:"-" json:"live_id,omitempty"`
 	Quality     int          `yaml:"quality,omitempty" json:"quality,omitempty"`
 	AudioOnly   bool         `yaml:"audio_only,omitempty" json:"audio_only,omitempty"`
@@ -781,6 +795,13 @@ type LiveRoom struct {
 
 	// 房间级可覆盖配置
 	OverridableConfig `yaml:",inline" json:",inline"` // 房间级配置覆盖
+}
+
+func (l *LiveRoom) IsAutoRecord() bool {
+	if l.AutoRecord == nil {
+		return true
+	}
+	return *l.AutoRecord
 }
 
 type liveRoomAlias LiveRoom
@@ -830,6 +851,7 @@ var defaultConfig = Config{
 	Feature: Feature{
 		UseNativeFlvParser:         false,
 		RemoveSymbolOtherCharacter: false,
+		SaveAsTS:                   true,
 	},
 	LiveRooms:          []LiveRoom{},
 	File:               "",

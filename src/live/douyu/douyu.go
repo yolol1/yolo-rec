@@ -2,6 +2,7 @@ package douyu
 
 import (
 	"bytes"
+	_ "embed"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/hr3lxphr6j/requests"
 
+	"github.com/bililive-go/bililive-go/src/configs"
 	"github.com/bililive-go/bililive-go/src/live"
 	"github.com/bililive-go/bililive-go/src/live/internal"
 	"github.com/bililive-go/bililive-go/src/pkg/utils"
@@ -48,8 +50,10 @@ func (b *builder) Build(url *url.URL) (live.Live, error) {
 	}, nil
 }
 
+//go:embed crypto-js.min.js
+var cryptoJS string
+
 var (
-	cryptoJS        []byte
 	douyuRoomIDRegs = []string{
 		`\$ROOM\.room_id\s*=\s*(\d+)`,
 		`room_id\s*=\s*(\d+)`,
@@ -105,36 +109,7 @@ func render(tmpl *template.Template, data any) (string, error) {
 	return buf.String(), nil
 }
 
-func (l *Live) loadCryptoJS() {
-	var (
-		resp *requests.Response
-		body []byte
-		err  error
-	)
-	cdnUrls := [...]string{"https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/crypto-js.min.js",
-		"https://cdn.jsdelivr.net/npm/crypto-js@3.1.9-1/crypto-js.min.js",
-		"https://cdn.staticfile.org/crypto-js/3.1.9-1/crypto-js.min.js",
-		"https://cdn.bootcdn.net/ajax/libs/crypto-js/3.1.9-1/crypto-js.min.js"}
-
-	for _, url := range cdnUrls {
-		resp, err = l.RequestSession.Get(url)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			continue
-		}
-		body, err = resp.Bytes()
-		if err != nil {
-			continue
-		}
-		cryptoJS = body
-		return
-	}
-	panic(fmt.Errorf("failed to load CryptoJS, please check network"))
-}
-
 func (l *Live) getEngineWithCryptoJS() (*otto.Otto, error) {
-	if cryptoJS == nil {
-		l.loadCryptoJS()
-	}
 	engine := otto.New()
 	if _, err := engine.Eval(cryptoJS); err != nil {
 		return nil, err
@@ -314,6 +289,14 @@ func (l *Live) getSignParams() (map[string]string, error) {
 	return values, nil
 }
 
+func (l *Live) DebugGetSignParams() (map[string]string, error) {
+	return l.getSignParams()
+}
+
+func (l *Live) DebugFetchPlayInfo(params map[string]string) ([]byte, error) {
+	return l.fetchPlayInfo(params)
+}
+
 func (l *Live) fetchPlayInfo(params map[string]string) ([]byte, error) {
 	resp, err := l.RequestSession.Post(
 		fmt.Sprintf("%s/%s", liveAPIUrl, l.roomID),
@@ -403,8 +386,10 @@ func (l *Live) GetStreamInfos() (infos []*live.StreamUrlInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("DEBUG: Douyu PlayInfo Response: %s\n", string(body))
 	if errorInt := gjson.GetBytes(body, "error").Int(); errorInt != 0 {
+		if errorInt == -5 {
+			return nil, live.ErrLiveOffline
+		}
 		return nil, fmt.Errorf("GetStreamInfos() failed, error: %d", errorInt)
 	}
 
@@ -431,33 +416,6 @@ func (l *Live) GetStreamInfos() (infos []*live.StreamUrlInfo, err error) {
 		defaultCdnCode = gjson.GetBytes(body, "data.rtmp_cdn").String()
 	}
 
-	infos = make([]*live.StreamUrlInfo, 0)
-
-	addUrlInfos := func(urls []*url.URL, cdnName, rateName, codec string) {
-		for _, u := range urls {
-			format := "flv"
-			if strings.Contains(u.Path, ".m3u8") {
-				format = "hls"
-			}
-			infos = append(infos, &live.StreamUrlInfo{
-				Url:                  u,
-				Name:                 fmt.Sprintf("%s - %s (%s)", cdnName, rateName, codec),
-				Description:          fmt.Sprintf("%s 线路，画质为 %s，视频编码为 %s", cdnName, rateName, codec),
-				Quality:              rateName,
-				Format:               format,
-				Codec:                codec,
-				HeadersForDownloader: make(map[string]string),
-				AttributesForStreamSelect: map[string]string{
-					"线路":          cdnName,
-					"画质":          rateName,
-					"编码":          codec,
-					"format_name": format,
-					"协议":          format,
-				},
-			})
-		}
-	}
-
 	defaultCdnName := "主线路"
 	for _, c := range cdns {
 		if c.Get("cdn").String() == defaultCdnCode {
@@ -467,7 +425,28 @@ func (l *Live) GetStreamInfos() (infos []*live.StreamUrlInfo, err error) {
 	}
 
 	defaultCodec := getCodecFromPlayInfo(body)
-	addUrlInfos(defaultUrls, defaultCdnName, "原画", defaultCodec)
+
+	type douyuOption struct {
+		cdnCode   string
+		cdnName   string
+		rateVal   int
+		rateName  string
+		codec     string
+		isDefault bool
+		urls      []*url.URL
+	}
+
+	options := []*douyuOption{
+		{
+			cdnCode:   defaultCdnCode,
+			cdnName:   defaultCdnName,
+			rateVal:   0,
+			rateName:  "原画",
+			codec:     defaultCodec,
+			isDefault: true,
+			urls:      defaultUrls,
+		},
+	}
 
 	// 如果 defaultCodec 是 hevc 编码，说明当前请求到了 HEVC，为了兼容性（比如有些播放器只支持 H264）我们再发一次 h264 请求作为备选流
 	if defaultCodec == "hevc" {
@@ -482,37 +461,166 @@ func (l *Live) GetStreamInfos() (infos []*live.StreamUrlInfo, err error) {
 			h264Live := gjson.GetBytes(h264Body, "data.rtmp_live").String()
 			h264RawUrlStr := fmt.Sprintf("%s/%s", h264Url, h264Live)
 			if h264Urls, err := utils.GenUrls(h264RawUrlStr); err == nil {
-				addUrlInfos(h264Urls, defaultCdnName, "原画", "h264")
+				options = append(options, &douyuOption{
+					cdnCode:   defaultCdnCode,
+					cdnName:   defaultCdnName,
+					rateVal:   0,
+					rateName:  "原画",
+					codec:     "h264",
+					isDefault: true,
+					urls:      h264Urls,
+				})
 			}
 		}
 	}
 
-	// 遍历其他 CDN 线路（请求 vframe = "h265"）
+	// 获取可选的所有 CDN 和清晰度组合
 	for _, c := range cdns {
 		cdnCode := c.Get("cdn").String()
 		cdnName := c.Get("name").String()
-		if cdnCode == "" || cdnCode == defaultCdnCode {
-			continue
+		isH265Supported := c.Get("isH265").Bool()
+
+		for _, r := range rates {
+			rateVal := int(r.Get("rate").Int())
+			rateName := r.Get("name").String()
+			if rateVal == 0 {
+				rateName = "原画"
+			}
+
+			// 支持的编码格式
+			codecs := []string{"h264"}
+			if isH265Supported || defaultCodec == "hevc" {
+				codecs = append(codecs, "hevc")
+			}
+
+			for _, codec := range codecs {
+				// 避免重复添加默认流
+				isAlreadyAdded := false
+				for _, opt := range options {
+					if opt.cdnCode == cdnCode && opt.rateVal == rateVal && opt.codec == codec {
+						isAlreadyAdded = true
+						break
+					}
+				}
+				if isAlreadyAdded {
+					continue
+				}
+
+				options = append(options, &douyuOption{
+					cdnCode:  cdnCode,
+					cdnName:  cdnName,
+					rateVal:  rateVal,
+					rateName: rateName,
+					codec:    codec,
+				})
+			}
 		}
-		urls, codec, err := l.fetchStreamForRateAndCDN(baseParams, 0, cdnCode, "h265")
-		if err != nil {
-			continue
-		}
-		addUrlInfos(urls, cdnName, "原画", codec)
 	}
 
-	// 遍历其他清晰度（请求 vframe = "h265"）
-	for _, r := range rates {
-		rateVal := int(r.Get("rate").Int())
-		rateName := r.Get("name").String()
-		if rateVal == 0 {
-			continue
+	// 读取用户当前的流偏好配置
+	var preferredQuality string
+	var preferredAttrs map[string]string
+	if config := configs.GetCurrentConfig(); config != nil {
+		if roomConfig, err := config.GetLiveRoomByUrl(l.GetRawUrl()); err == nil && roomConfig.StreamPreference != nil {
+			if roomConfig.StreamPreference.Quality != nil {
+				preferredQuality = *roomConfig.StreamPreference.Quality
+			}
+			if roomConfig.StreamPreference.Attributes != nil {
+				preferredAttrs = *roomConfig.StreamPreference.Attributes
+			}
 		}
-		urls, codec, err := l.fetchStreamForRateAndCDN(baseParams, rateVal, "", "h265")
-		if err != nil {
-			continue
+	}
+
+	// 如果有流偏好，找出与该偏好最匹配的选项，并在此处单独加载它的真实 URL
+	var bestOpt *douyuOption
+	bestScore := -1
+
+	if preferredQuality != "" || len(preferredAttrs) > 0 {
+		for _, opt := range options {
+			score := 0
+			if preferredQuality != "" && opt.rateName == preferredQuality {
+				score += 100
+			}
+			for k, v := range preferredAttrs {
+				if k == "线路" && opt.cdnName == v {
+					score += 1
+				} else if k == "画质" && opt.rateName == v {
+					score += 1
+				} else if k == "编码" && opt.codec == v {
+					score += 1
+				}
+			}
+			if score > bestScore {
+				bestScore = score
+				bestOpt = opt
+			}
 		}
-		addUrlInfos(urls, defaultCdnName, rateName, codec)
+	}
+
+	// 如果匹配出的最佳选项尚未加载真实 URL，则通过网络请求获取
+	if bestOpt != nil && len(bestOpt.urls) == 0 {
+		vframe := "h265"
+		if bestOpt.codec == "h264" {
+			vframe = "h264"
+		}
+		urls, codec, err := l.fetchStreamForRateAndCDN(baseParams, bestOpt.rateVal, bestOpt.cdnCode, vframe)
+		if err == nil && len(urls) > 0 {
+			bestOpt.urls = urls
+			bestOpt.codec = codec
+		} else {
+			l.GetLogger().Warnf("无法获取偏好流的真实 URL (quality=%s, cdn=%s, codec=%s): %v", bestOpt.rateName, bestOpt.cdnName, bestOpt.codec, err)
+		}
+	}
+
+	// 构建最终的 StreamUrlInfo 列表
+	infos = make([]*live.StreamUrlInfo, 0, len(options))
+	for _, opt := range options {
+		format := "flv"
+
+		if len(opt.urls) > 0 {
+			// 有真实 URL 的流
+			for _, u := range opt.urls {
+				if strings.Contains(u.Path, ".m3u8") {
+					format = "hls"
+				}
+				infos = append(infos, &live.StreamUrlInfo{
+					Url:                  u,
+					Name:                 fmt.Sprintf("%s - %s (%s)", opt.cdnName, opt.rateName, opt.codec),
+					Description:          fmt.Sprintf("%s 线路，画质为 %s，视频编码为 %s", opt.cdnName, opt.rateName, opt.codec),
+					Quality:              opt.rateName,
+					Format:               format,
+					Codec:                opt.codec,
+					HeadersForDownloader: make(map[string]string),
+					AttributesForStreamSelect: map[string]string{
+						"线路":          opt.cdnName,
+						"画质":          opt.rateName,
+						"编码":          opt.codec,
+						"format_name": format,
+						"协议":          format,
+					},
+					IsPlaceHolder: false,
+				})
+			}
+		} else {
+			// 占位符流 (IsPlaceHolder = true, Url = nil)
+			infos = append(infos, &live.StreamUrlInfo{
+				Url:                  nil,
+				Name:                 fmt.Sprintf("%s - %s (%s) [未加载]", opt.cdnName, opt.rateName, opt.codec),
+				Description:          fmt.Sprintf("%s 线路，画质为 %s，视频编码为 %s (选择后将自动加载)", opt.cdnName, opt.rateName, opt.codec),
+				Quality:              opt.rateName,
+				Format:               format,
+				Codec:                opt.codec,
+				HeadersForDownloader: make(map[string]string),
+				AttributesForStreamSelect: map[string]string{
+					"线路":          opt.cdnName,
+					"画质":          opt.rateName,
+					"编码":          opt.codec,
+					"format_name": format,
+					"协议":          format,
+				},
+				IsPlaceHolder: true,
+			})
+		}
 	}
 
 	return infos, nil

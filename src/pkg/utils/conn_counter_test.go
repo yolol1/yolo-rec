@@ -24,23 +24,23 @@ func TestCreateTLSConfig(t *testing.T) {
 		{
 			name:                "edgesrv.com exact match",
 			host:                "edgesrv.com",
-			expectWeakCiphers:   true,
-			expectMinTLS12:      true,
-			expectedCipherCount: 7, // 4 ECDHE + 3 CBC
+			expectWeakCiphers:   false,
+			expectMinTLS12:      false,
+			expectedCipherCount: 0,
 		},
 		{
 			name:                "subdomain of edgesrv.com",
 			host:                "stream-shanghai-ct-61-172-246-239.edgesrv.com",
-			expectWeakCiphers:   true,
-			expectMinTLS12:      true,
-			expectedCipherCount: 7,
+			expectWeakCiphers:   false,
+			expectMinTLS12:      false,
+			expectedCipherCount: 0,
 		},
 		{
 			name:                "another subdomain of edgesrv.com",
 			host:                "cdn.edgesrv.com",
-			expectWeakCiphers:   true,
-			expectMinTLS12:      true,
-			expectedCipherCount: 7,
+			expectWeakCiphers:   false,
+			expectMinTLS12:      false,
+			expectedCipherCount: 0,
 		},
 		{
 			name:                "non-edgesrv.com domain",

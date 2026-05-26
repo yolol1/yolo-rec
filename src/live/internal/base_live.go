@@ -19,6 +19,7 @@ import (
 type BaseLive struct {
 	Url            *url.URL
 	LastStartTime  time.Time
+	LastEndTime    time.Time
 	LiveId         types.LiveID
 	Options        *live.Options
 	RequestSession *requests.Session
@@ -109,6 +110,14 @@ func (a *BaseLive) GetLastStartTime() time.Time {
 
 func (a *BaseLive) SetLastStartTime(time time.Time) {
 	a.LastStartTime = time
+}
+
+func (a *BaseLive) GetLastEndTime() time.Time {
+	return a.LastEndTime
+}
+
+func (a *BaseLive) SetLastEndTime(time time.Time) {
+	a.LastEndTime = time
 }
 
 func (a *BaseLive) GetOptions() *live.Options {

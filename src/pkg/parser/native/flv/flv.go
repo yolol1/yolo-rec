@@ -3,6 +3,7 @@ package flv
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,13 +11,16 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bililive-go/bililive-go/src/configs"
 	"github.com/bililive-go/bililive-go/src/instance"
 	"github.com/bililive-go/bililive-go/src/live"
 	"github.com/bililive-go/bililive-go/src/pkg/livelogger"
 	"github.com/bililive-go/bililive-go/src/pkg/parser"
+	"github.com/bililive-go/bililive-go/src/pkg/proxy"
 	"github.com/bililive-go/bililive-go/src/pkg/reader"
 	"github.com/bililive-go/bililive-go/src/pkg/utils"
 )
@@ -46,9 +50,26 @@ type builder struct{}
 
 func (b *builder) Build(cfg map[string]string, logger *livelogger.LiveLogger) (parser.Parser, error) {
 	audioOnly := cfg["audio_only"] == "true"
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+				tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			},
+		},
+	}
+	proxy.ApplyDownloadProxyToTransport(transport)
+
 	return &Parser{
 		Metadata:  Metadata{},
-		hc:        &http.Client{},
+		hc:        &http.Client{Transport: transport},
 		stopCh:    make(chan struct{}),
 		closeOnce: new(sync.Once),
 		audioOnly: audioOnly,
@@ -73,6 +94,8 @@ type Parser struct {
 	closeOnce *sync.Once
 	audioOnly bool
 	logger    *livelogger.LiveLogger
+
+	writtenBytes atomic.Int64
 }
 
 func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.StreamUrlInfo, live live.Live, file string) error {
@@ -160,7 +183,9 @@ func (p *Parser) doParse(ctx context.Context) error {
 }
 
 func (p *Parser) doCopy(ctx context.Context, n uint32) error {
-	if writtenCount, err := io.CopyN(p.o, p.i, int64(n)); err != nil || writtenCount != int64(writtenCount) {
+	writtenCount, err := io.CopyN(p.o, p.i, int64(n))
+	p.writtenBytes.Add(writtenCount)
+	if err != nil || writtenCount != int64(writtenCount) {
 		utils.PrintStack()
 		if err == nil {
 			err = fmt.Errorf("doCopy(%d), %d bytes written", n, writtenCount)
@@ -176,6 +201,7 @@ func (p *Parser) doWrite(ctx context.Context, b []byte) error {
 	leftInputSize := len(b)
 	for retryLeft := ioRetryCount; retryLeft > 0 && leftInputSize > 0; retryLeft-- {
 		writtenCount, err := p.o.Write(b[len(b)-leftInputSize:])
+		p.writtenBytes.Add(int64(writtenCount))
 		leftInputSize -= writtenCount
 		if err != nil {
 			logger.Debugf("%s", string(debug.Stack()))
@@ -194,6 +220,7 @@ func (p *Parser) doWrite(ctx context.Context, b []byte) error {
 // Status 返回下载器的当前状态
 func (p *Parser) Status() (map[string]interface{}, error) {
 	return map[string]interface{}{
-		"parser": Name,
+		"parser":     Name,
+		"total_size": strconv.FormatInt(p.writtenBytes.Load(), 10),
 	}, nil
 }

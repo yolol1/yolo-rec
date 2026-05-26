@@ -4,7 +4,7 @@ rpc:
   enable: true
   bind: :8080
   sse_list_threshold: 50
-debug: false
+debug: true
 interval: 20
 out_put_path: ./
 ffmpeg_path: "" # 如果此项为空，就自动在环境变量里寻找
@@ -15,6 +15,9 @@ log:
   rotate_days: 7
 feature:
   remove_symbol_other_character: false
+  # 是否自动将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
+  # 默认启用，如需关闭请设置为 false
+  save_as_ts: true
 # '{{ .Live.GetPlatformCNName }}/{{ .HostName | filenameFilter }}/[{{ now | date "2006-01-02 15-04-05"}}][{{ .HostName | filenameFilter }}][{{ .RoomName | filenameFilter }}].flv'
 # ./平台名称/主播名字/[时间戳][主播名字][房间名字].flv
 # https://github.com/bililive-go/bililive-go/wiki/More-Tips

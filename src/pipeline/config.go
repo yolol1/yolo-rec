@@ -8,6 +8,7 @@ import (
 const (
 	StageNameFixFlv        = "fix_flv"
 	StageNameConvertMp4    = "convert_mp4"
+	StageNameConvertTs     = "convert_ts"
 	StageNameExtractCover  = "extract_cover"
 	StageNameCloudUpload   = "cloud_upload"
 	StageNameCustomCmd     = "custom_command"

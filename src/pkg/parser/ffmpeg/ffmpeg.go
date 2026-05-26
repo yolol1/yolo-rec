@@ -56,6 +56,7 @@ type Parser struct {
 	timeoutInUs string
 	audioOnly   bool
 	useFlvProxy bool // 是否使用 FLV 代理分段
+	isStopped   bool
 
 	statusReq  chan struct{}
 	statusResp chan map[string]interface{}
@@ -220,6 +221,11 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 		args = append(args, "-re")
 	}
 
+	// 对于 TS 录制，增加 nobuffer 优化延迟
+	if strings.HasSuffix(strings.ToLower(file), ".ts") {
+		args = append(args, "-fflags", "nobuffer")
+	}
+
 	// 使用代理时，不需要设置 User-Agent 和 Referer（代理会处理）
 	if useProxy {
 		args = append(args,
@@ -242,6 +248,22 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 	}
 
 	args = append(args, "-c", "copy")
+
+	// 如果是转封装为 TS 格式且输入流是 FLV 流，添加相应的比特流过滤器
+	if p.isFlvStream(url) && strings.HasSuffix(strings.ToLower(file), ".ts") && !p.audioOnly {
+		codec := strings.ToLower(streamUrlInfo.Codec)
+		if strings.Contains(codec, "hevc") || strings.Contains(codec, "h265") {
+			args = append(args, "-bsf:v", "hevc_mp4toannexb")
+		} else {
+			// 默认使用 h264_mp4toannexb
+			args = append(args, "-bsf:v", "h264_mp4toannexb")
+		}
+	}
+
+	// 强制以 mpegts 格式输出
+	if strings.HasSuffix(strings.ToLower(file), ".ts") {
+		args = append(args, "-f", "mpegts")
+	}
 
 	// 不使用代理时，添加额外的请求头
 	if !useProxy {
@@ -270,6 +292,10 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 	func() {
 		p.cmdLock.Lock()
 		defer p.cmdLock.Unlock()
+		if p.isStopped {
+			err = fmt.Errorf("parser is already stopped")
+			return
+		}
 		p.cmd = exec.Command(ffmpegPath, args...)
 		if p.cmdStdIn, err = p.cmd.StdinPipe(); err != nil {
 			return
@@ -341,6 +367,7 @@ func (p *Parser) Stop() (err error) {
 
 		p.cmdLock.Lock()
 		defer p.cmdLock.Unlock()
+		p.isStopped = true
 		if p.cmd != nil && p.cmd.ProcessState == nil {
 			if p.cmdStdIn != nil && p.cmd.Process != nil {
 				if _, err = p.cmdStdIn.Write([]byte("q")); err != nil {
