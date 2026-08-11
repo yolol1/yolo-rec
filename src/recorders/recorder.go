@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -318,6 +319,17 @@ func (r *recorder) tryRecord(ctx context.Context) {
 	obj, _ := r.cache.Get(r.Live)
 	info := obj.(*live.Info)
 
+	// 兜底：如果 HostName 为空，尝试从数据库获取，避免文件名中出现空主机名
+	if info.HostName == "" {
+		r.getLogger().Warn("缓存中的 HostName 为空，尝试从数据库获取兜底值")
+		if hostName := r.getHostNameFallback(ctx); hostName != "" {
+			info.HostName = hostName
+		}
+	}
+	if info.RoomName == "" {
+		info.RoomName = "直播"
+	}
+
 	tmpl := getDefaultFileNameTmpl()
 	// 使用层级配置的 OutputTmpl
 	if resolvedConfig.OutputTmpl != "" {
@@ -590,10 +602,17 @@ func (r *recorder) tryRecord(ctx context.Context) {
 
 	if err != nil {
 		r.getLogger().WithError(err).Error("failed to parse live stream")
-		return
+		// 流异常退出/被强制结束时，只要确实产出了文件，仍要继续后处理
+		// （修复/转换/云上传），否则最后一段（时长很短、文件很小）会被遗漏在本地文件夹。
+		// 若 ffmpeg 启动即失败、没有产出任何文件，则保持原有行为直接返回。
 	}
 	r.getLogger().Debugln("End ParseLiveStream(" + url.String() + ", " + fileName + ")")
 	removeEmptyFile(fileName)
+	if err != nil {
+		if _, statErr := os.Stat(fileName); statErr != nil {
+			return
+		}
+	}
 
 	// 使用层级配置的 OnRecordFinished
 	cmdStr := strings.Trim(resolvedConfig.OnRecordFinished.CustomCommandline, "")
@@ -876,6 +895,7 @@ func (r *recorder) run(ctx context.Context) {
 	}()
 
 	const minRetryInterval = 5 * time.Second
+	var lastDiskFullWarning time.Time
 
 	for {
 		select {
@@ -884,8 +904,57 @@ func (r *recorder) run(ctx context.Context) {
 		default:
 			// 每次 tryRecord 使用独立的子 context
 			// tryRecord 返回时 cancel 会停止所有异步操作（如 HLS 探测 goroutine）
+			
+			// 磁盘空间检查
+			cfg := configs.GetCurrentConfig()
+			room, _ := cfg.GetLiveRoomByUrl(r.Live.GetRawUrl())
+			platformKey := configs.GetPlatformKeyFromUrl(r.Live.GetRawUrl())
+			resolvedConfig := cfg.ResolveConfigForRoom(room, platformKey)
+			
+			if resolvedConfig.MinFreeSpace > 0 {
+				if free, err := utils.GetDiskFreeSpace(resolvedConfig.OutPutPath); err == nil {
+					if free < uint64(resolvedConfig.MinFreeSpace)*1024*1024 {
+						if time.Since(lastDiskFullWarning) > 1*time.Minute {
+							r.getLogger().Warnf("磁盘空间不足 (剩余 %.2f MB < 最小保留 %d MB)，录制暂停，等待空间清理...", float64(free)/1024/1024, resolvedConfig.MinFreeSpace)
+							lastDiskFullWarning = time.Now()
+						}
+						select {
+						case <-r.stop:
+							return
+						case <-ctx.Done():
+							return
+						case <-time.After(15 * time.Second):
+						}
+						continue
+					} else if !lastDiskFullWarning.IsZero() {
+						r.getLogger().Infof("磁盘空间已恢复 (剩余 %.2f MB)，准备开始录制", float64(free)/1024/1024)
+						lastDiskFullWarning = time.Time{} // reset
+					}
+				}
+			}
+
 			tryCtx, tryCancel := context.WithCancel(ctx)
 			start := time.Now()
+
+			// 监控：如果超过 2 分钟仍未开始实际录制（仍处于“录制准备中”），强行结束重试
+			go func() {
+				ticker := time.NewTicker(15 * time.Second)
+				defer ticker.Stop()
+				timeout := 2 * time.Minute
+				for {
+					select {
+					case <-tryCtx.Done():
+						return
+					case <-ticker.C:
+						if time.Since(start) > timeout && !r.IsRecording() {
+							r.getLogger().Warn("录制准备超时（可能 FFmpeg 卡死），强行结束当前进程进行重试")
+							r.setAndCloseParser(nil)
+							return
+						}
+					}
+				}
+			}()
+
 			r.tryRecord(tryCtx)
 			tryCancel()
 
@@ -1179,9 +1248,12 @@ func (r *recorder) GetStatus() (map[string]interface{}, error) {
 	statusP, ok := r.getParser().(parser.StatusParser)
 	if ok {
 		var err error
-		status, err = statusP.Status()
-		if err != nil {
-			status = nil
+		rawStatus, err := statusP.Status()
+		if err == nil && rawStatus != nil {
+			status = make(map[string]interface{})
+			for k, v := range rawStatus {
+				status[k] = v
+			}
 		}
 	}
 	if status == nil {
@@ -1316,13 +1388,10 @@ func (r *recorder) HasFlvProxy() bool {
 	return false
 }
 
-// saveCurrentStreamInfo 保存当前录制的流信息
-func (r *recorder) saveCurrentStreamInfo(s *live.StreamUrlInfo) {
-	if s == nil {
-		return
-	}
-
-	// 格式
+// streamUrlInfoToAvailableStreamInfo 将 StreamUrlInfo 转换为 AvailableStreamInfo
+// 统一处理格式推断、编码默认值、码率回退等逻辑
+func streamUrlInfoToAvailableStreamInfo(s *live.StreamUrlInfo) *live.AvailableStreamInfo {
+	// 格式推断
 	format := strings.ToLower(s.Format)
 	if format == "" && s.Url != nil {
 		urlPath := s.Url.Path
@@ -1333,19 +1402,19 @@ func (r *recorder) saveCurrentStreamInfo(s *live.StreamUrlInfo) {
 		}
 	}
 
-	// 编码
+	// 编码默认值
 	codec := s.Codec
 	if codec == "" {
 		codec = "h264"
 	}
 
-	// 码率
+	// 码率回退（Vbitrate 作为 Bitrate 的备选）
 	bitrate := s.Bitrate
 	if bitrate == 0 && s.Vbitrate > 0 {
 		bitrate = s.Vbitrate
 	}
 
-	streamInfo := &live.AvailableStreamInfo{
+	return &live.AvailableStreamInfo{
 		Format:                    format,
 		Quality:                   s.Quality,
 		QualityName:               live.GetQualityName(s.Quality),
@@ -1358,6 +1427,15 @@ func (r *recorder) saveCurrentStreamInfo(s *live.StreamUrlInfo) {
 		AudioCodec:                s.AudioCodec,
 		AttributesForStreamSelect: s.AttributesForStreamSelect,
 	}
+}
+
+// saveCurrentStreamInfo 保存当前录制的流信息
+func (r *recorder) saveCurrentStreamInfo(s *live.StreamUrlInfo) {
+	if s == nil {
+		return
+	}
+
+	streamInfo := streamUrlInfoToAvailableStreamInfo(s)
 
 	r.currentFileLock.Lock()
 	r.currentStreamInfo = streamInfo
@@ -1367,46 +1445,8 @@ func (r *recorder) saveCurrentStreamInfo(s *live.StreamUrlInfo) {
 // updateAvailableStreams 更新可用流信息到 Info
 func (r *recorder) updateAvailableStreams(ctx context.Context, info *live.Info, streamInfos []*live.StreamUrlInfo) {
 	availableStreams := make([]*live.AvailableStreamInfo, 0, len(streamInfos))
-
 	for _, s := range streamInfos {
-		// 格式
-		format := strings.ToLower(s.Format)
-		if format == "" && s.Url != nil {
-			urlPath := s.Url.Path
-			if strings.Contains(urlPath, ".flv") {
-				format = "flv"
-			} else if strings.Contains(urlPath, "m3u8") {
-				format = "hls"
-			}
-		}
-
-		// 编码
-		codec := s.Codec
-		if codec == "" {
-			codec = "h264"
-		}
-
-		// 码率
-		bitrate := s.Bitrate
-		if bitrate == 0 && s.Vbitrate > 0 {
-			bitrate = s.Vbitrate
-		}
-
-		stream := &live.AvailableStreamInfo{
-			Format:                    format,
-			Quality:                   s.Quality,
-			QualityName:               live.GetQualityName(s.Quality),
-			Description:               s.Description,
-			Width:                     s.Width,
-			Height:                    s.Height,
-			Bitrate:                   bitrate,
-			FrameRate:                 s.FrameRate,
-			Codec:                     codec,
-			AudioCodec:                s.AudioCodec,
-			AttributesForStreamSelect: s.AttributesForStreamSelect,
-		}
-
-		availableStreams = append(availableStreams, stream)
+		availableStreams = append(availableStreams, streamUrlInfoToAvailableStreamInfo(s))
 	}
 
 	info.AvailableStreams = availableStreams
@@ -1561,6 +1601,37 @@ func extractCookiesString(l live.Live) string {
 		parts = append(parts, c.Name+"="+c.Value)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// getHostNameFallback 从数据库获取主播名称作为兜底值
+// 当缓存中 HostName 为空时调用，避免文件名中出现空主机名
+// 使用反射调用 GetLiveRoom 以避免循环导入（recorders ↔ livestate）
+func (r *recorder) getHostNameFallback(ctx context.Context) string {
+	inst := instance.GetInstance(ctx)
+	if inst.LiveStateStore == nil {
+		return ""
+	}
+
+	storeValue := reflect.ValueOf(inst.LiveStateStore)
+	method := storeValue.MethodByName("GetLiveRoom")
+	if !method.IsValid() {
+		return ""
+	}
+
+	results := method.Call([]reflect.Value{
+		reflect.ValueOf(ctx),
+		reflect.ValueOf(string(r.Live.GetLiveId())),
+	})
+	// GetLiveRoom 返回 (*LiveRoom, error)
+	if len(results) != 2 || !results[1].IsNil() || results[0].IsNil() {
+		return ""
+	}
+
+	hostName := results[0].Elem().FieldByName("HostName").String()
+	if hostName != "" {
+		r.getLogger().Infof("从数据库获取到兜底 HostName: %s", hostName)
+	}
+	return hostName
 }
 
 // extractDouyinRoomID 从抖音直播 URL 中提取房间号（字符串）。
