@@ -19,7 +19,7 @@
    - **前后端都改了**：运行 `make build-web dev`
 2. **不要使用** `go build ./...`，必须使用 Make 命令（`make dev` 或 `make build-web dev`）
 3. **提交前检查**：确保 `make build-web dev`、`make lint`、`make test` 全部通过
-4. **禁止擅自提交**：不要主动执行 `git commit`、`git push` 等 git 操作，除非用户明确要求
+4. **自动提交**：完成代码修复或优化后，应主动执行 `git commit` 提交变更；提交信息使用中文，说明本次改动内容。`git push` 仅在用户明确要求时执行
 
 ## 详细指南（Skills）
 
