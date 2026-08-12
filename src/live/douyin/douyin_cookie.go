@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,10 +14,11 @@ import (
 )
 
 var (
-	autoCookie string
-	lastSynced string
-	syncMu     sync.Mutex // Ensures only one sync operation runs at a time
-	cookieMu   sync.RWMutex
+	autoCookie      string
+	lastSynced      string
+	lastSyncAttempt time.Time
+	syncMu          sync.Mutex // Ensures only one sync operation runs at a time
+	cookieMu        sync.RWMutex
 )
 
 // getDouyinCookie 获取抖音 Cookie。
@@ -58,25 +58,32 @@ func getDouyinCookie() string {
 
 	// 检查是否需要同步到 btools
 	cookieMu.RLock()
-	needSync := c != lastSynced
+	needSync := c != lastSynced && time.Since(lastSyncAttempt) > 10*time.Second
 	cookieMu.RUnlock()
 
 	if needSync {
-		syncMu.Lock()
-		// 双重检查
-		cookieMu.RLock()
-		stillNeedSync := c != lastSynced
-		cookieMu.RUnlock()
+		// 异步执行，避免阻塞主流程
+		go func(cookieVal string) {
+			syncMu.Lock()
+			defer syncMu.Unlock()
 
-		if stillNeedSync {
-			success := syncCookieToBtools(c)
-			if success {
+			cookieMu.RLock()
+			stillNeedSync := cookieVal != lastSynced && time.Since(lastSyncAttempt) > 10*time.Second
+			cookieMu.RUnlock()
+
+			if stillNeedSync {
 				cookieMu.Lock()
-				lastSynced = c
+				lastSyncAttempt = time.Now()
 				cookieMu.Unlock()
+
+				success := syncCookieToBtools(cookieVal)
+				if success {
+					cookieMu.Lock()
+					lastSynced = cookieVal
+					cookieMu.Unlock()
+				}
 			}
-		}
-		syncMu.Unlock()
+		}(c)
 	}
 
 	return c
@@ -101,7 +108,7 @@ func syncCookieToBtools(cookieVal string) bool {
 		return false
 	}
 
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 10; i++ { // 等待最多 20 秒，确保 btools 启动
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
 		if err != nil {
 			blog.GetLogger().WithError(err).Error("创建 Cookie 同步请求失败")
@@ -113,17 +120,14 @@ func syncCookieToBtools(cookieVal string) bool {
 
 		resp, err := btoolsHttpClient.Do(req)
 		if err != nil {
-			blog.GetLogger().WithError(err).Debug("同步 Cookie 到 btools 失败，btools 可能尚未就绪，稍后重试...")
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			blog.GetLogger().Warnf("同步 Cookie 到 btools 响应状态异常: %d, body: %s，稍后重试...", resp.StatusCode, string(body))
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 
@@ -131,7 +135,7 @@ func syncCookieToBtools(cookieVal string) bool {
 		return true
 	}
 
-	blog.GetLogger().Error("同步 Cookie 到 btools 最终失败")
+	blog.GetLogger().Debug("同步 Cookie 到 btools 失败 (若未运行 btools 可忽略此提示)")
 	return false
 }
 

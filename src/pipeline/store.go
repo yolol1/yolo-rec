@@ -89,6 +89,7 @@ func (s *SQLiteStore) initSchema() error {
 		total_stages INTEGER DEFAULT 0,
 		stage_results_json TEXT,
 		progress INTEGER DEFAULT 0,
+		total_file_size INTEGER DEFAULT 0,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
@@ -101,7 +102,20 @@ func (s *SQLiteStore) initSchema() error {
 	`
 
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 迁移：为旧数据库添加 total_file_size 列
+	s.migrateAddColumn("total_file_size", "INTEGER DEFAULT 0")
+
+	return nil
+}
+
+// migrateAddColumn 安全添加列（忽略已存在的错误）
+func (s *SQLiteStore) migrateAddColumn(columnName, columnDef string) {
+	// SQLite 的 ALTER TABLE ADD COLUMN 在列已存在时会报错，忽略即可
+	_, _ = s.db.Exec("ALTER TABLE pipeline_tasks ADD COLUMN " + columnName + " " + columnDef)
 }
 
 // CreateTask 创建任务
@@ -120,8 +134,8 @@ func (s *SQLiteStore) CreateTask(ctx context.Context, task *PipelineTask) error 
 			status, record_info_json, pipeline_config_json,
 			initial_files_json, current_files_json,
 			current_stage, total_stages, stage_results_json,
-			progress, created_at, can_retry
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			progress, total_file_size, created_at, can_retry
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		task.Status,
 		string(recordInfoJSON),
@@ -132,6 +146,7 @@ func (s *SQLiteStore) CreateTask(ctx context.Context, task *PipelineTask) error 
 		task.TotalStages,
 		string(stageResultsJSON),
 		task.Progress,
+		task.TotalFileSize,
 		task.CreatedAt,
 		boolToInt(task.CanRetry),
 	)
@@ -157,7 +172,7 @@ func (s *SQLiteStore) GetTask(ctx context.Context, id int64) (*PipelineTask, err
 		SELECT id, status, record_info_json, pipeline_config_json,
 			initial_files_json, current_files_json,
 			current_stage, total_stages, stage_results_json,
-			progress, created_at, started_at, completed_at,
+			progress, total_file_size, created_at, started_at, completed_at,
 			error_message, can_retry
 		FROM pipeline_tasks WHERE id = ?
 	`, id)
@@ -218,7 +233,7 @@ func (s *SQLiteStore) ListTasks(ctx context.Context, filter TaskFilter) ([]*Pipe
 		SELECT id, status, record_info_json, pipeline_config_json,
 			initial_files_json, current_files_json,
 			current_stage, total_stages, stage_results_json,
-			progress, created_at, started_at, completed_at,
+			progress, total_file_size, created_at, started_at, completed_at,
 			error_message, can_retry
 		FROM pipeline_tasks
 	`
@@ -272,11 +287,11 @@ func (s *SQLiteStore) GetPendingTasks(ctx context.Context, limit int) ([]*Pipeli
 		SELECT id, status, record_info_json, pipeline_config_json,
 			initial_files_json, current_files_json,
 			current_stage, total_stages, stage_results_json,
-			progress, created_at, started_at, completed_at,
+			progress, total_file_size, created_at, started_at, completed_at,
 			error_message, can_retry
 		FROM pipeline_tasks
 		WHERE status = ?
-		ORDER BY created_at ASC
+		ORDER BY total_file_size ASC, created_at ASC
 		LIMIT ?
 	`, PipelineStatusPending, limit)
 	if err != nil {
@@ -335,6 +350,7 @@ func scanTask(row *sql.Row) (*PipelineTask, error) {
 	var status string
 	var startedAt, completedAt sql.NullTime
 	var errorMessage sql.NullString
+	var totalFileSize sql.NullInt64
 	var canRetry int
 
 	err := row.Scan(
@@ -348,6 +364,7 @@ func scanTask(row *sql.Row) (*PipelineTask, error) {
 		&task.TotalStages,
 		&stageResultsJSON,
 		&task.Progress,
+		&totalFileSize,
 		&task.CreatedAt,
 		&startedAt,
 		&completedAt,
@@ -360,6 +377,9 @@ func scanTask(row *sql.Row) (*PipelineTask, error) {
 
 	task.Status = PipelineStatus(status)
 	task.CanRetry = canRetry != 0
+	if totalFileSize.Valid {
+		task.TotalFileSize = totalFileSize.Int64
+	}
 
 	if startedAt.Valid {
 		task.StartedAt = &startedAt.Time
@@ -398,6 +418,7 @@ func scanTaskFromRows(rows *sql.Rows) (*PipelineTask, error) {
 	var status string
 	var startedAt, completedAt sql.NullTime
 	var errorMessage sql.NullString
+	var totalFileSize sql.NullInt64
 	var canRetry int
 
 	err := rows.Scan(
@@ -411,6 +432,7 @@ func scanTaskFromRows(rows *sql.Rows) (*PipelineTask, error) {
 		&task.TotalStages,
 		&stageResultsJSON,
 		&task.Progress,
+		&totalFileSize,
 		&task.CreatedAt,
 		&startedAt,
 		&completedAt,
@@ -423,6 +445,9 @@ func scanTaskFromRows(rows *sql.Rows) (*PipelineTask, error) {
 
 	task.Status = PipelineStatus(status)
 	task.CanRetry = canRetry != 0
+	if totalFileSize.Valid {
+		task.TotalFileSize = totalFileSize.Int64
+	}
 
 	if startedAt.Valid {
 		task.StartedAt = &startedAt.Time

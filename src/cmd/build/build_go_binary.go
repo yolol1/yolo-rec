@@ -89,7 +89,12 @@ func BuildGoBinary(isDev bool) {
 		goHostArch = runtime.GOARCH
 	}
 
-	outputPath := "bin/" + generateBinaryName(goHostOS, goHostArch)
+	var outputPath string
+	if isDev {
+		outputPath = "bin/" + getDevBinaryName()
+	} else {
+		outputPath = "bin/" + generateBinaryName(goHostOS, goHostArch)
+	}
 	BuildGoBinaryWithOutput(isDev, outputPath)
 }
 

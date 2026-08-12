@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 
@@ -259,6 +260,41 @@ func Init() (err error) {
 	return nil
 }
 
+// patchBtoolsJS 自动给 btools 打上支持 config cookie 的补丁
+func patchBtoolsJS(btoolsFolder string) {
+	jsFile := filepath.Join(btoolsFolder, "index-Bpquc_Ve.cjs")
+	content, err := os.ReadFile(jsFile)
+	if err != nil {
+		return
+	}
+	contentStr := string(content)
+	patched := false
+
+	targetStr1 := `const info = await index.getInfo(roomId, { api: "balance" });`
+	if strings.Contains(contentStr, targetStr1) {
+		replacement1 := `const config = exports.appConfig.getAll();
+        const douyinCookie = config.recorder?.douyin?.cookie || config["recorder.douyin.cookie"] || "";
+        const info = await index.getInfo(roomId, { api: "balance", cookie: douyinCookie });`
+		contentStr = strings.Replace(contentStr, targetStr1, replacement1, 1)
+		patched = true
+	}
+
+	// 使用正则匹配 getStream 的调用
+	importRegexp := regexp.MustCompile(`(const\s+info\s*=\s*await\s+index\.getStream\(\{\s*channelId:\s*roomId,\s*quality:\s*0,\s*streamPriorities:\s*\[\],\s*sourcePriorities:\s*\[\],\s*formatPriorities:\s*\["flv"\],\s*)(\}\);)`)
+	if importRegexp.MatchString(contentStr) {
+		replacement2 := `const config = exports.appConfig.getAll();
+        const douyinCookie = config.recorder?.douyin?.cookie || config["recorder.douyin.cookie"] || "";
+        $1cookie: douyinCookie, $2`
+		contentStr = importRegexp.ReplaceAllString(contentStr, replacement2)
+		patched = true
+	}
+
+	if patched {
+		blog.GetLogger().Infoln("应用 bililive-tools cookie 补丁...")
+		_ = os.WriteFile(jsFile, []byte(contentStr), 0644)
+	}
+}
+
 func startBTools() error {
 	// 设置状态为正在启动
 	currentBToolsStatus.Store(int32(BToolsStatusStarting))
@@ -303,13 +339,46 @@ func startBTools() error {
 
 	nodeFolder := filepath.Dir(node.GetToolPath())
 	btoolsFolder := filepath.Dir(btools.GetToolPath())
-	env := []string{
-		"PATH=" + nodeFolder + string(os.PathListSeparator) + os.Getenv("PATH"),
-	}
+	patchBtoolsJS(btoolsFolder)
+	
 	nodePath, err := filepath.Abs(node.GetToolPath())
 	if err != nil {
 		currentBToolsStatus.Store(int32(BToolsStatusFailed))
 		return err
+	}
+	env := []string{
+		"PATH=" + nodeFolder + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+
+	// 修复：如果由于意外关机等原因导致 appConfig.json 为 0 字节，btools 解析 JSON 会直接崩溃
+	appConfigPath := filepath.Join(btoolsFolder, "appConfig.json")
+	if stat, err := os.Stat(appConfigPath); err == nil && stat.Size() == 0 {
+		_ = os.Remove(appConfigPath)
+		blog.GetLogger().Warn("检测到损坏的(0字节) appConfig.json，已删除")
+	}
+
+	// 如果缺少 appConfig.json，btools 会立即退出，因此我们自己生成一个默认的
+	if _, err := os.Stat(appConfigPath); os.IsNotExist(err) {
+		defaultConfig := `{
+  "port": 18110,
+  "host": "127.0.0.1",
+  "passKey": "Basic YTph",
+  "auth": {
+    "user": "a",
+    "pass": "a"
+  },
+  "configFolder": "",
+  "ffmpegPath": "ffmpeg",
+  "ffprobePath": "ffprobe",
+  "mesioPath": "mesio",
+  "danmakuFactoryPath": "DanmakuFactory",
+  "logPath": ""
+}`
+		if err := os.WriteFile(appConfigPath, []byte(defaultConfig), 0644); err != nil {
+			blog.GetLogger().Errorf("生成默认 appConfig.json 失败: %v", err)
+		} else {
+			blog.GetLogger().Info("已自动生成默认的 appConfig.json")
+		}
 	}
 	cmd := exec.Command(
 		nodePath,
@@ -323,7 +392,14 @@ func startBTools() error {
 	// 动态决定是否输出，保留错误信息，同时过滤掉已知的无上下文反爬噪音
 	cmd.Stdout = utils.NewDebugControlledWriter(os.Stdout)
 	cmd.Stderr = utils.NewFilteredLineWriter(func(line string, isImportant bool) {
-		if strings.Contains(line, "API webHTML") {
+		if strings.Contains(line, "API webHTML") ||
+			strings.Contains(line, "API userHTML") ||
+			strings.Contains(line, "API web ") ||
+			strings.Contains(line, "API mobile ") {
+			return
+		}
+		// 过滤 bililive-tools 工作线程中的已知无害错误
+		if strings.Contains(line, "TypeError: Cannot read properties of undefined (reading 'liveData')") {
 			return
 		}
 		os.Stderr.Write([]byte(line + "\n"))

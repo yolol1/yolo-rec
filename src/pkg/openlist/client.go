@@ -35,7 +35,8 @@ func (c *Client) SetToken(token string) {
 }
 
 // Upload 上传文件（使用 PUT /api/fs/put）
-func (c *Client) Upload(ctx context.Context, localPath, remotePath string, onProgress func(UploadProgress)) error {
+// speedLimitKBps: 上传速度限制 (KB/s)，0 表示不限速
+func (c *Client) Upload(ctx context.Context, localPath, remotePath string, onProgress func(UploadProgress), speedLimitKBps int) error {
 	// 打开本地文件
 	file, err := os.Open(localPath)
 	if err != nil {
@@ -50,11 +51,18 @@ func (c *Client) Upload(ctx context.Context, localPath, remotePath string, onPro
 
 	totalSize := fileInfo.Size()
 
-	// 创建进度追踪 Reader
+	// 创建进度追踪 Reader（包装在限速读取器内部）
 	progressReader := NewProgressReader(file, totalSize, onProgress)
 
+	// 如果设置了限速，包装限速读取器
+	var reader io.Reader = progressReader
+	if speedLimitKBps > 0 {
+		limitBytesPerSec := int64(speedLimitKBps) * 1024
+		reader = NewRateLimitedReader(progressReader, limitBytesPerSec)
+	}
+
 	// 构建请求
-	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/fs/put", progressReader)
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/fs/put", reader)
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %w", err)
 	}
@@ -168,9 +176,13 @@ func (c *Client) CheckStorageHealth(ctx context.Context, storageName string) err
 
 // GetToken 获取管理员 Token（通过登录）
 func (c *Client) GetToken(ctx context.Context, username, password string) (string, error) {
-	body := fmt.Sprintf(`{"username":"%s","password":"%s"}`, username, password)
+	payload := map[string]string{"username": username, "password": password}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("构建请求体失败: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/auth/login",
-		bytes.NewReader([]byte(body)))
+		bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", err
 	}
@@ -203,9 +215,13 @@ func (c *Client) GetToken(ctx context.Context, username, password string) (strin
 
 // Mkdir 创建目录
 func (c *Client) Mkdir(ctx context.Context, remotePath string) error {
-	body := fmt.Sprintf(`{"path":"%s"}`, remotePath)
+	payload := map[string]string{"path": remotePath}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("构建请求体失败: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/fs/mkdir",
-		bytes.NewReader([]byte(body)))
+		bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}

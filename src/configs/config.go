@@ -63,6 +63,10 @@ type Feature struct {
 
 	// SaveAsTS 是否将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
 	SaveAsTS bool `yaml:"save_as_ts" json:"save_as_ts"`
+
+	// TwitchDisableAdsProxy 用于 Twitch 的去广告 M3U8 代理地址，为空则直连官方
+	// 支持使用 {{ .Login }} 占位符，例如: https://api.ttv.lol/playlist/{{ .Login }}.m3u8
+	TwitchDisableAdsProxy string `yaml:"twitch_disable_ads_proxy,omitempty" json:"twitch_disable_ads_proxy,omitempty"`
 }
 
 // GetEffectiveDownloaderType 获取实际生效的下载器类型
@@ -279,10 +283,15 @@ const (
 // CloudUpload 云上传配置
 type CloudUpload struct {
 	Enable             bool     `yaml:"enable" json:"enable"`                                               // 是否启用云上传
+	ApiUrl             string   `yaml:"api_url" json:"api_url"`                                             // 外部 OpenList API 地址
+	Username           string   `yaml:"username" json:"username"`                                           // 外部 OpenList 用户名
+	Password           string   `yaml:"password" json:"password"`                                           // 外部 OpenList 密码
 	StorageName        string   `yaml:"storage_name" json:"storage_name"`                                   // 使用的 OpenList 存储名称
 	UploadPathTmpl     string   `yaml:"upload_path_tmpl" json:"upload_path_tmpl"`                           // 上传路径模板
 	DeleteAfterUpload  bool     `yaml:"delete_after_upload" json:"delete_after_upload"`                     // 上传成功后删除本地文件
-	AdditionalStorages []string `yaml:"additional_storages,omitempty" json:"additional_storages,omitempty"` // 额外存储（支持多目标上传）
+	UploadSpeedLimit     int      `yaml:"upload_speed_limit" json:"upload_speed_limit"`                       // 上传速度限制 (KB/s)，0 表示不限速
+	MaxConcurrentUploads int      `yaml:"max_concurrent_uploads" json:"max_concurrent_uploads"`               // 最大并发上传数，0 表示不限制（顺序上传）
+	AdditionalStorages   []string `yaml:"additional_storages,omitempty" json:"additional_storages,omitempty"` // 额外存储（支持多目标上传）
 }
 
 // On record finished actions.
@@ -431,6 +440,7 @@ type OverridableConfig struct {
 	StreamPreference     *StreamPreference     `yaml:"stream_preference,omitempty" json:"stream_preference,omitempty"`           // 流偏好配置
 	DanmakuEnable        *bool                 `yaml:"danmaku_enable,omitempty" json:"danmaku_enable,omitempty"`                 // 是否录制弹幕（支持哔哩哔哩、抖音）
 	Danmaku              *DanmakuConfig        `yaml:"danmaku,omitempty" json:"danmaku,omitempty"`                               // 弹幕录制参数
+	MinFreeSpace         *int                  `yaml:"min_free_space,omitempty" json:"min_free_space,omitempty"`                 // 最小保留可用空间(MB)
 }
 
 // PlatformConfig 包含平台特定的设置
@@ -482,6 +492,7 @@ type Config struct {
 	TimeoutInUs          int                  `yaml:"timeout_in_us" json:"timeout_in_us"`
 	DanmakuEnable        bool                 `yaml:"danmaku_enable" json:"danmaku_enable"`
 	Danmaku              DanmakuConfig        `yaml:"danmaku" json:"danmaku"`
+	MinFreeSpace         int                  `yaml:"min_free_space" json:"min_free_space"`
 
 	// 流偏好配置 - 两套系统并存
 	StreamPreference StreamPreference `yaml:"stream_preference,omitempty" json:"stream_preference,omitempty"` // 新版（渐进迁移中）
@@ -853,6 +864,7 @@ var defaultConfig = Config{
 		RemoveSymbolOtherCharacter: false,
 		SaveAsTS:                   true,
 	},
+	MinFreeSpace:       1024,
 	LiveRooms:          []LiveRoom{},
 	File:               "",
 	liveRoomIndexCache: map[string]int{},
@@ -934,6 +946,15 @@ func newConfigPostProcess(c *Config) {
 	}
 	if c.AppDataPath == "" {
 		c.AppDataPath = filepath.Join(c.OutPutPath, ".appdata")
+	}
+	if c.PlatformConfigs == nil {
+		c.PlatformConfigs = map[string]PlatformConfig{}
+	}
+	// 强制设置 douyin 平台的默认最小访问间隔，防止 btools 被并发打满导致超时和 500 错误
+	douyinCfg := c.PlatformConfigs["douyin"]
+	if douyinCfg.MinAccessIntervalSec == 0 {
+		douyinCfg.MinAccessIntervalSec = 3
+		c.PlatformConfigs["douyin"] = douyinCfg
 	}
 }
 
@@ -1247,6 +1268,7 @@ func (c *Config) ResolveConfigForRoom(room *LiveRoom, platformName string) Resol
 		TimeoutInUs:          c.TimeoutInUs,
 		DanmakuEnable:        c.DanmakuEnable,
 		Danmaku:              c.Danmaku,
+		MinFreeSpace:         c.MinFreeSpace,
 	}
 
 	// 应用平台级覆盖
@@ -1308,6 +1330,7 @@ type ResolvedConfig struct {
 	StreamPreference     StreamPreference     `json:"stream_preference"`
 	DanmakuEnable        bool                 `json:"danmaku_enable"`
 	Danmaku              DanmakuConfig        `json:"danmaku"`
+	MinFreeSpace         int                  `json:"min_free_space"`
 }
 
 // applyOverrides 将可覆盖配置中的非空值应用到解析配置中
@@ -1347,6 +1370,9 @@ func (r *ResolvedConfig) applyOverrides(override *OverridableConfig) {
 	}
 	if override.Danmaku != nil {
 		r.Danmaku = mergeDanmakuConfig(&r.Danmaku, override.Danmaku)
+	}
+	if override.MinFreeSpace != nil {
+		r.MinFreeSpace = *override.MinFreeSpace
 	}
 }
 

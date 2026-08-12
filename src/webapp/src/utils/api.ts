@@ -474,6 +474,22 @@ class API {
     setUpdateChannel(channel: 'stable' | 'prerelease') {
         return utils.requestPut(`${BASE_URL}/update/channel`, { channel });
     }
+
+    /**
+     * 测试云上传连接
+     * @param config 云上传配置
+     */
+    testCloudUploadConnection(config: {
+        api_url: string;
+        username: string;
+        password: string;
+        storage_name: string;
+        additional_storages?: string[];
+        upload_path_tmpl: string;
+        delete_after_upload: boolean;
+    }): Promise<{ success: boolean; steps: Array<{ name: string; success: boolean; message: string }> }> {
+        return utils.requestPost(`${BASE_URL}/openlist/test-connection`, config) as Promise<{ success: boolean; steps: Array<{ name: string; success: boolean; message: string }> }>;
+    }
 }
 
 export default API;

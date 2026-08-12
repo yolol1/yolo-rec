@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/bililive-go/bililive-go/src/live"
@@ -63,12 +64,16 @@ type RecordInfo struct {
 
 // NewRecordInfo 从 live.Info 创建录制信息
 func NewRecordInfo(info *live.Info) RecordInfo {
+	startTime := info.Live.GetLastStartTime()
+	if startTime.IsZero() {
+		startTime = time.Now()
+	}
 	return RecordInfo{
 		LiveID:    info.Live.GetLiveId(),
 		Platform:  info.Live.GetPlatformCNName(),
 		HostName:  info.HostName,
 		RoomName:  info.RoomName,
-		StartTime: time.Now(),
+		StartTime: startTime,
 	}
 }
 
@@ -173,6 +178,22 @@ func (sc *StageConfig) GetStringSliceOption(key string) []string {
 	return nil
 }
 
+// GetIntOption 获取整数类型选项
+// JSON 反序列化时数字可能是 float64，需要兼容处理
+func (sc *StageConfig) GetIntOption(key string, defaultValue int) int {
+	v, ok := sc.GetOption(key)
+	if !ok {
+		return defaultValue
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	}
+	return defaultValue
+}
+
 // PipelineConfig 管道配置
 type PipelineConfig struct {
 	Stages []StageConfig `yaml:"stages" json:"stages"` // 阶段列表
@@ -236,6 +257,7 @@ type PipelineTask struct {
 	TotalStages    int             `json:"total_stages"`    // 总阶段数
 	StageResults   []StageResult   `json:"stage_results"`   // 各阶段执行结果
 	Progress       int             `json:"progress"`        // 整体进度 (0-100)
+	TotalFileSize  int64           `json:"total_file_size"` // 所有初始文件的总大小（字节），用于优先级排序
 	CreatedAt      time.Time       `json:"created_at"`
 	StartedAt      *time.Time      `json:"started_at,omitempty"`
 	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
@@ -253,6 +275,14 @@ func NewPipelineTask(recordInfo RecordInfo, config *PipelineConfig, initialFiles
 		}
 	}
 
+	// 计算所有初始文件的总大小
+	var totalSize int64
+	for _, f := range initialFiles {
+		if fi, err := os.Stat(f.Path); err == nil {
+			totalSize += fi.Size()
+		}
+	}
+
 	return &PipelineTask{
 		Status:         PipelineStatusPending,
 		RecordInfo:     recordInfo,
@@ -263,6 +293,7 @@ func NewPipelineTask(recordInfo RecordInfo, config *PipelineConfig, initialFiles
 		TotalStages:    totalStages,
 		StageResults:   make([]StageResult, 0),
 		Progress:       0,
+		TotalFileSize:  totalSize,
 		CreatedAt:      time.Now(),
 		CanRetry:       true,
 	}

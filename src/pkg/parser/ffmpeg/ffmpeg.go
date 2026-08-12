@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"github.com/bililive-go/bililive-go/src/pkg/flvproxy"
 	"github.com/bililive-go/bililive-go/src/pkg/livelogger"
 	"github.com/bililive-go/bililive-go/src/pkg/parser"
+	"github.com/bililive-go/bililive-go/src/pkg/proxy"
 	bilisentry "github.com/bililive-go/bililive-go/src/pkg/sentry"
 	"github.com/bililive-go/bililive-go/src/pkg/utils"
 )
@@ -112,22 +114,17 @@ func (p *Parser) decodeFFmpegStatus(b []byte) (status map[string]interface{}) {
 func (p *Parser) scheduler() {
 	defer close(p.statusResp)
 	statusCh := p.scanFFmpegStatus()
+	var latestStatus map[string]interface{}
 	for {
 		select {
 		case <-p.statusReq:
-			select {
-			case b, ok := <-statusCh:
-				if !ok {
-					return
-				}
-				p.statusResp <- p.decodeFFmpegStatus(b)
-			case <-time.After(time.Second * 3):
-				p.statusResp <- nil
-			}
-		default:
-			if _, ok := <-statusCh; !ok {
+			// 返回最新的状态（如果是初始阶段可能为 nil）
+			p.statusResp <- latestStatus
+		case b, ok := <-statusCh:
+			if !ok {
 				return
 			}
+			latestStatus = p.decodeFFmpegStatus(b)
 		}
 	}
 }
@@ -215,11 +212,12 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 		"-y",
 	}
 
-	// 为了测试方便，本地地址不需要限速
-	// 使用代理时，FFmpeg 连接的是本地地址，不需要限速
-	if url.Hostname() != "localhost" && !useProxy {
-		args = append(args, "-re")
-	}
+	// 警告：千万不要在录制直播流时使用 -re 参数！
+	// -re 会让 FFmpeg 按照 PTS (时间戳) 速率来读取输入。
+	// 在录制 Twitch 等流时，去广告节点会导致时间戳出现跳跃（跳过广告的时间段）。
+	// 如果带有 -re 参数，FFmpeg 遇到时间戳跳跃时会“休眠”等待，导致严重落后于直播流的最新进度，
+	// 从而发生漏录分片（HTTP 404）、画面跳跃、声音不连续等严重问题。
+	// args = append(args, "-re") // 已移除
 
 	// 对于 TS 录制，增加 nobuffer 优化延迟
 	if strings.HasSuffix(strings.ToLower(file), ".ts") {
@@ -247,7 +245,7 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 		p.logger.Info("只录音频模式已启用，将忽略视频流")
 	}
 
-	args = append(args, "-c", "copy")
+	args = append(args, "-c", "copy", "-max_muxing_queue_size", "9999")
 
 	// 如果是转封装为 TS 格式且输入流是 FLV 流，添加相应的比特流过滤器
 	if p.isFlvStream(url) && strings.HasSuffix(strings.ToLower(file), ".ts") && !p.audioOnly {
@@ -296,7 +294,35 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 			err = fmt.Errorf("parser is already stopped")
 			return
 		}
+		
+		// 动态替换 User-Agent 避免 Twitch 阻断
+		for i, a := range args {
+			if a == "-user_agent" && i+1 < len(args) {
+				args[i+1] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+			}
+		}
+		
 		p.cmd = exec.Command(ffmpegPath, args...)
+		
+		// 继承并注入代理环境变量，解决 Windows 下 FFmpeg 无法读取系统代理的问题
+		env := os.Environ()
+		proxyEnvVars := proxy.GetDownloadProxyEnvVars()
+		if len(proxyEnvVars) > 0 {
+			env = append(env, proxyEnvVars...)
+		} else {
+			req, _ := http.NewRequest("GET", inputURL, nil)
+			if proxyURL, err := http.ProxyFromEnvironment(req); err == nil && proxyURL != nil {
+				proxyStr := proxyURL.String()
+				env = append(env, 
+					"HTTP_PROXY="+proxyStr,
+					"HTTPS_PROXY="+proxyStr,
+					"http_proxy="+proxyStr,
+					"https_proxy="+proxyStr,
+				)
+			}
+		}
+		p.cmd.Env = env
+
 		if p.cmdStdIn, err = p.cmd.StdinPipe(); err != nil {
 			return
 		}

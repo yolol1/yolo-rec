@@ -2,6 +2,8 @@ package iostats
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 // 用于记录直播间请求的成功/失败状态
 type RequestTracker struct {
 	store Store
-	mu    sync.Mutex
 }
 
 // NewRequestTracker 创建请求追踪器
@@ -34,9 +35,6 @@ func (t *RequestTracker) RecordFailure(liveID, platform string, errMsg string) {
 
 // record 内部记录方法
 func (t *RequestTracker) record(liveID, platform string, success bool, errMsg string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	status := &RequestStatus{
 		Timestamp:    time.Now().UnixMilli(),
 		LiveID:       liveID,
@@ -49,6 +47,10 @@ func (t *RequestTracker) record(liveID, platform string, success bool, errMsg st
 	defer cancel()
 
 	if err := t.store.SaveRequestStatus(ctx, status); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
+			// 忽略超时日志以防刷屏
+			return
+		}
 		logrus.WithError(err).WithFields(logrus.Fields{
 			"live_id":  liveID,
 			"platform": platform,
@@ -80,13 +82,13 @@ func GetGlobalTracker() *RequestTracker {
 // TrackRequestSuccess 便捷方法：记录成功的请求
 func TrackRequestSuccess(liveID, platform string) {
 	if tracker := GetGlobalTracker(); tracker != nil {
-		tracker.RecordSuccess(liveID, platform)
+		go tracker.RecordSuccess(liveID, platform)
 	}
 }
 
 // TrackRequestFailure 便捷方法：记录失败的请求
 func TrackRequestFailure(liveID, platform string, errMsg string) {
 	if tracker := GetGlobalTracker(); tracker != nil {
-		tracker.RecordFailure(liveID, platform, errMsg)
+		go tracker.RecordFailure(liveID, platform, errMsg)
 	}
 }

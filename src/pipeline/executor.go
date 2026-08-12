@@ -162,14 +162,17 @@ func (e *Executor) executeStage(
 
 	// 执行阶段
 	output, err = stage.Execute(ctx, input)
-	if err != nil {
-		return nil, nil, "", err
-	}
 
-	// 如果阶段实现了 CommandRecorder 接口，获取命令记录
+	// 无论执行成功还是失败，都收集阶段日志和命令记录，
+	// 否则失败阶段的详细日志（如云上传失败原因）会在网页上丢失
 	if cr, ok := stage.(CommandRecorder); ok {
 		commands = cr.GetCommands()
 		logs = cr.GetLogs()
+	}
+
+	if err != nil {
+		// 失败时也要返回已收集的日志和命令，供网页展示失败详情
+		return nil, commands, logs, err
 	}
 
 	return output, commands, logs, nil

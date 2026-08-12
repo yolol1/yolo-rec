@@ -1,7 +1,11 @@
 version: "2"
 linters:
-  disable:
-    - errcheck
+  enable:
+    - gocyclo
+    - gocognit
+    - funlen
+    - goconst
+    - unparam
   exclusions:
     generated: lax
     presets:
@@ -13,6 +17,25 @@ linters:
       - third_party$
       - builtin$
       - examples$
+    rules:
+      # 测试文件放宽部分检查
+      - path: _test\.go$
+        linters:
+          - funlen
+          - goconst
+  settings:
+    gocyclo:
+      min-complexity: 20
+    gocognit:
+      min-complexity: 50
+    funlen:
+      lines: 100
+      statements: 60
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    unparam:
+      check-exported: false
 formatters:
   exclusions:
     generated: lax

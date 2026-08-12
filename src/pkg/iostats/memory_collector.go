@@ -2,6 +2,8 @@ package iostats
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/bililive-go/bililive-go/src/pkg/memstats"
@@ -203,9 +205,11 @@ func (c *MemoryCollector) collect() {
 		RSS:       totalRSS,
 	})
 
-	// 保存统计数据
 	if len(stats) > 0 {
 		if err := c.store.SaveMemoryStats(ctx, stats); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
+				return
+			}
 			logrus.WithError(err).Error("保存内存统计数据失败")
 		}
 	}

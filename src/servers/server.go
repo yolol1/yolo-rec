@@ -141,6 +141,7 @@ func initMux(ctx context.Context) *mux.Router {
 	// OpenList (云上传) API 路由
 	apiRoute.HandleFunc("/openlist/status", getOpenListStatus).Methods("GET")
 	apiRoute.HandleFunc("/openlist/check-storage", checkOpenListStorageHealth).Methods("GET")
+	apiRoute.HandleFunc("/openlist/test-connection", testCloudUploadConnection).Methods("POST")
 
 	// Pipeline 任务路由
 	inst := instance.GetInstance(ctx)

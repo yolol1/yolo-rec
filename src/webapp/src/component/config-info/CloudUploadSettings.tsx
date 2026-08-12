@@ -1,8 +1,10 @@
-import React from 'react';
-import { Card, Form, Switch, Select, Input, Tag, Alert } from 'antd';
-import { CloudUploadOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Form, Switch, Select, Input, InputNumber, Tag, Alert, Button, Modal, Space } from 'antd';
+import { CloudUploadOutlined, PlusOutlined, MinusCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ApiOutlined } from '@ant-design/icons';
+import API from '../../utils/api';
 
 const { TextArea } = Input;
+const api = new API();
 
 interface ConfigFieldProps {
   label: string;
@@ -36,6 +38,53 @@ interface CloudUploadSettingsProps {
  */
 const CloudUploadSettings: React.FC<CloudUploadSettingsProps> = ({ config }) => {
   const isEnabled = config.on_record_finished?.cloud_upload?.enable;
+  const form = Form.useFormInstance();
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; steps: Array<{ name: string; success: boolean; message: string }> } | null>(null);
+
+  const handleTestConnection = async () => {
+    const values = form.getFieldsValue();
+    const cloudConfig = values.on_record_finished?.cloud_upload || {};
+
+    if (!cloudConfig.api_url) {
+      Modal.warning({ title: '提示', content: '请先填写 API 地址' });
+      return;
+    }
+    if (!cloudConfig.username) {
+      Modal.warning({ title: '提示', content: '请先填写用户名' });
+      return;
+    }
+    if (!cloudConfig.password) {
+      Modal.warning({ title: '提示', content: '请先填写密码' });
+      return;
+    }
+    if (!cloudConfig.storage_name) {
+      Modal.warning({ title: '提示', content: '请先填写存储名称' });
+      return;
+    }
+
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.testCloudUploadConnection({
+        api_url: cloudConfig.api_url,
+        username: cloudConfig.username,
+        password: cloudConfig.password,
+        storage_name: cloudConfig.storage_name,
+        additional_storages: cloudConfig.additional_storages || [],
+        upload_path_tmpl: cloudConfig.upload_path_tmpl || '',
+        delete_after_upload: cloudConfig.delete_after_upload || false,
+      });
+      setTestResult(result);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        steps: [{ name: '请求失败', success: false, message: err.message || String(err) }],
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
     <Card
@@ -84,6 +133,30 @@ const CloudUploadSettings: React.FC<CloudUploadSettingsProps> = ({ config }) => 
         </Form.Item>
       </ConfigField>
       <ConfigField
+        label="OpenList API 地址"
+        description="外部 OpenList 实例的访问地址，例如：http://192.168.1.100:5244"
+      >
+        <Form.Item name={['on_record_finished', 'cloud_upload', 'api_url']} noStyle>
+          <Input placeholder="http://127.0.0.1:5244" style={{ width: 300 }} />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
+        label="OpenList 用户名"
+        description="用于登录 OpenList 的管理员账号"
+      >
+        <Form.Item name={['on_record_finished', 'cloud_upload', 'username']} noStyle>
+          <Input placeholder="输入用户名" style={{ width: 300 }} />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
+        label="OpenList 密码"
+        description="用于登录 OpenList 的管理员密码"
+      >
+        <Form.Item name={['on_record_finished', 'cloud_upload', 'password']} noStyle>
+          <Input.Password placeholder="输入密码" style={{ width: 300 }} />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
         label="存储名称"
         description="在 OpenList 中配置的存储名称，例如：115、阿里云盘"
       >
@@ -92,13 +165,40 @@ const CloudUploadSettings: React.FC<CloudUploadSettingsProps> = ({ config }) => 
         </Form.Item>
       </ConfigField>
       <ConfigField
+        label="额外存储"
+        description="同时上传到多个存储目标，每个存储名称单独填写（可选）"
+      >
+        <Form.List name={['on_record_finished', 'cloud_upload', 'additional_storages']}>
+          {(fields, { add, remove }) => (
+            <div>
+              {fields.map(({ key, name, ...restField }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                  <Form.Item {...restField} name={[name]} noStyle>
+                    <Input placeholder="例如: 阿里云盘" style={{ width: 200 }} />
+                  </Form.Item>
+                  <MinusCircleOutlined
+                    onClick={() => remove(name)}
+                    style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 16 }}
+                  />
+                </div>
+              ))}
+              <Form.Item noStyle>
+                <a href="#!" onClick={(e) => { e.preventDefault(); add(); }} style={{ whiteSpace: 'nowrap' }}>
+                  <PlusOutlined /> 添加额外存储
+                </a>
+              </Form.Item>
+            </div>
+          )}
+        </Form.List>
+      </ConfigField>
+      <ConfigField
         label="上传路径模板"
-        description='支持变量: {{ .Platform }}, {{ .HostName }}, {{ .RoomName }}, {{ .Ext }}, {{ now | date "2006-01-02" }}'
+        description='模板仅定义目录结构，原始文件名自动保留。支持变量: {{ .Platform }}, {{ .HostName }}, {{ .RoomName }}, {{ now | date "2006-01-02" }}。如需自定义文件名，可加入 {{ .FileName }}'
       >
         <Form.Item name={['on_record_finished', 'cloud_upload', 'upload_path_tmpl']} noStyle>
           <TextArea
             rows={2}
-            placeholder='/录播归档/{{ .Platform }}/{{ .HostName }}/{{ .RoomName }}-{{ now | date "2006-01-02" }}.{{ .Ext }}'
+            placeholder='/录播归档/{{ .Platform }}/{{ .HostName }}/{{ now | date "2006-01-02" }}'
             style={{ width: 500 }}
           />
         </Form.Item>
@@ -111,6 +211,52 @@ const CloudUploadSettings: React.FC<CloudUploadSettingsProps> = ({ config }) => 
           <Switch />
         </Form.Item>
       </ConfigField>
+      <ConfigField
+        label="上传速度限制"
+        description="限制单个文件上传速度，防止占用过多带宽影响其他任务，单位为 KB/s，0 表示不限速"
+      >
+        <Form.Item name={['on_record_finished', 'cloud_upload', 'upload_speed_limit']} noStyle>
+          <InputNumber min={0} placeholder="例如: 10240 (10MB/s)" style={{ width: 250 }} addonAfter="KB/s" />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
+        label="最大并发上传数"
+        description="同时上传的文件数量上限，小文件优先上传，正在上传的文件不会被中断。0 或不填表示顺序上传"
+      >
+        <Form.Item name={['on_record_finished', 'cloud_upload', 'max_concurrent_uploads']} noStyle>
+          <InputNumber min={0} max={10} placeholder="例如: 2" style={{ width: 120 }} />
+        </Form.Item>
+      </ConfigField>
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+        <Space>
+          <Button
+            icon={<ApiOutlined />}
+            onClick={handleTestConnection}
+            loading={testing}
+          >
+            测试连接
+          </Button>
+          {testResult && (
+            <Tag color={testResult.success ? 'green' : 'red'}>
+              {testResult.success ? '全部通过' : '存在失败项'}
+            </Tag>
+          )}
+        </Space>
+        {testResult && (
+          <div style={{ marginTop: 12 }}>
+            {testResult.steps.map((step, idx) => (
+              <div key={idx} style={{ marginBottom: 4, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {step.success
+                  ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                  : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                }
+                <span style={{ fontWeight: 500 }}>{step.name}:</span>
+                <span style={{ color: step.success ? '#333' : '#ff4d4f' }}>{step.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </Card>
   );
 };

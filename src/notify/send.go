@@ -11,6 +11,7 @@ import (
 	"github.com/bililive-go/bililive-go/src/notify/ntfy"
 	"github.com/bililive-go/bililive-go/src/notify/telegram"
 	"github.com/bililive-go/bililive-go/src/pkg/livelogger"
+	"github.com/bililive-go/bililive-go/src/pkg/utils"
 )
 
 // RecordingFileDetail 录制文件详情
@@ -207,9 +208,8 @@ func buildRecordingSummaryMessage(hostName, platform string, files []RecordingFi
 		fmt.Fprintf(&sb, "  ... 还有 %d 个文件未显示\n", len(files)-maxDisplayFiles)
 	}
 	fmt.Fprintf(&sb, "总大小：%s", formatFileSize(totalSize))
-	// 显示剩余磁盘空间
 	if outputPath != "" {
-		if free, err := getDiskFreeSpace(outputPath); err == nil {
+		if free, err := utils.GetDiskFreeSpace(outputPath); err == nil {
 			fmt.Fprintf(&sb, "\n剩余磁盘空间：%s", formatFileSize(int64(free)))
 		}
 	}

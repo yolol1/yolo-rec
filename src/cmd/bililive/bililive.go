@@ -377,7 +377,11 @@ func main() {
 	pipelineDbPath := filepath.Join(config.AppDataPath, "db", "pipeline.db")
 	pipelineStore, err := pipeline.NewSQLiteStore(pipelineDbPath)
 	if err != nil {
-		logger.WithError(err).Fatal("初始化 Pipeline 数据库失败")
+		logger.WithError(err).Warn("初始化 Pipeline 数据库失败，将降级使用内存数据库")
+		pipelineStore, err = pipeline.NewSQLiteStore(":memory:")
+		if err != nil {
+			logger.WithError(err).Fatal("内存数据库也初始化失败")
+		}
 	}
 	pipelineConfig := &pipeline.ManagerConfig{
 		MaxConcurrent: config.TaskQueue.MaxConcurrent,

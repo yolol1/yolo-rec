@@ -78,40 +78,43 @@ func (prl *PlatformRateLimiter) WaitForPlatformWithContext(ctx context.Context, 
 		return true
 	}
 
-	for {
-		// 检查 context 是否已取消
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
+	// 检查 context 是否已取消 (fast path)
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
 
-		// 获取锁，计算等待时间
-		limiter.mu.Lock()
-		now := time.Now()
-		elapsed := now.Sub(limiter.lastAccess)
+	limiter.mu.Lock()
+	now := time.Now()
 
-		if elapsed >= limiter.minInterval {
-			// 已经等待足够长时间，更新访问时间并返回
-			limiter.lastAccess = now
-			limiter.mu.Unlock()
-			return true
-		}
+	// 计算这个请求被分配的执行时间
+	var allowedTime time.Time
+	// limiter.lastAccess 实际上表示的是"上一个请求被分配的执行时间"
+	nextAllowed := limiter.lastAccess.Add(limiter.minInterval)
+	if nextAllowed.Before(now) {
+		allowedTime = now
+	} else {
+		allowedTime = nextAllowed
+	}
+	limiter.lastAccess = allowedTime
+	limiter.mu.Unlock()
 
-		// 计算需要等待的时间
-		waitTime := limiter.minInterval - elapsed
-		limiter.mu.Unlock() // 释放锁再 sleep，避免阻塞 ForceAccess 等操作
-
-		// 在不持有锁的情况下等待，支持 context 取消
+	waitTime := allowedTime.Sub(now)
+	if waitTime > 0 {
 		timer := time.NewTimer(waitTime)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			// 注意：如果被取消，这会导致预留的时间槽被浪费
+			// 但这不影响正确性，只是可能在短时间内少发几个请求
 			return false
 		case <-timer.C:
-			// 循环回去重新检查
+			// 成功等待到了指定时间
 		}
 	}
+
+	return true
 }
 
 // GetPlatformNextAllowedTime 获取平台下次允许访问的时间
@@ -180,19 +183,18 @@ func (prl *PlatformRateLimiter) GetPlatformWaitInfo(platform string) WaitInfo {
 	defer limiter.mu.Unlock()
 
 	now := time.Now()
-	elapsed := now.Sub(limiter.lastAccess)
+	nextAllowed := limiter.lastAccess.Add(limiter.minInterval)
 
-	info := WaitInfo{
-		WaitedSeconds:  elapsed.Seconds(),
-		MinIntervalSec: int(limiter.minInterval.Seconds()),
+	var nextRequestIn float64
+	if nextAllowed.After(now) {
+		nextRequestIn = nextAllowed.Sub(now).Seconds()
 	}
 
-	if elapsed < limiter.minInterval {
-		// 还需要等待
-		info.NextRequestInSec = (limiter.minInterval - elapsed).Seconds()
+	return WaitInfo{
+		WaitedSeconds:    0, // 不再全局追踪排队等待时间
+		MinIntervalSec:   int(limiter.minInterval.Seconds()),
+		NextRequestInSec: nextRequestIn,
 	}
-
-	return info
 }
 
 // ForceAccess 强制访问平台，忽略频率限制
@@ -211,6 +213,11 @@ func (prl *PlatformRateLimiter) ForceAccess(platform string) time.Duration {
 
 	now := time.Now()
 	elapsed := now.Sub(limiter.lastAccess)
-	limiter.lastAccess = now
+	
+	// 如果上次预定的时间在未来，强制访问不改变排队队列，仅更新为当前时间（如果它在过去的话）
+	if limiter.lastAccess.Before(now) {
+		limiter.lastAccess = now
+	}
+	
 	return elapsed
 }

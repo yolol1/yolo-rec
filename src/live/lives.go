@@ -26,20 +26,42 @@ type SchedulerRefreshCallback func(live Live, status SchedulerStatus)
 // RequestStatusCallback 请求状态追踪的回调函数类型
 type RequestStatusCallback func(liveID, platform string, success bool, errMsg string)
 
-// 全局调度器刷新回调（由外部包设置，避免循环依赖）
-var schedulerRefreshCallback SchedulerRefreshCallback
+// callbackRegistry 回调注册表，使用读写锁保护并发访问
+// 替代原来的包级全局变量，避免数据竞争
+type callbackRegistry struct {
+	mu                      sync.RWMutex
+	schedulerRefreshCallback SchedulerRefreshCallback
+	requestStatusCallback    RequestStatusCallback
+}
 
-// 全局请求状态追踪回调（由 iostats 包设置，避免循环依赖）
-var requestStatusCallback RequestStatusCallback
+var callbacks = &callbackRegistry{}
 
 // SetSchedulerRefreshCallback 设置调度器刷新完成的回调函数
 func SetSchedulerRefreshCallback(callback SchedulerRefreshCallback) {
-	schedulerRefreshCallback = callback
+	callbacks.mu.Lock()
+	defer callbacks.mu.Unlock()
+	callbacks.schedulerRefreshCallback = callback
 }
 
 // SetRequestStatusCallback 设置请求状态追踪的回调函数
 func SetRequestStatusCallback(callback RequestStatusCallback) {
-	requestStatusCallback = callback
+	callbacks.mu.Lock()
+	defer callbacks.mu.Unlock()
+	callbacks.requestStatusCallback = callback
+}
+
+// getSchedulerRefreshCallback 线程安全地获取调度器刷新回调
+func getSchedulerRefreshCallback() SchedulerRefreshCallback {
+	callbacks.mu.RLock()
+	defer callbacks.mu.RUnlock()
+	return callbacks.schedulerRefreshCallback
+}
+
+// getRequestStatusCallback 线程安全地获取请求状态回调
+func getRequestStatusCallback() RequestStatusCallback {
+	callbacks.mu.RLock()
+	defer callbacks.mu.RUnlock()
+	return callbacks.requestStatusCallback
 }
 
 var (
@@ -303,13 +325,13 @@ func (w *WrappedLive) GetInfo() (*Info, error) {
 	i, err := w.Live.GetInfo()
 
 	// 记录请求状态到 IO 统计（通过回调避免循环依赖）
-	if requestStatusCallback != nil {
+	if cb := getRequestStatusCallback(); cb != nil {
 		liveID := string(w.GetLiveId())
 		platform := w.GetPlatformCNName()
 		if err != nil {
-			requestStatusCallback(liveID, platform, false, err.Error())
+			cb(liveID, platform, false, err.Error())
 		} else {
-			requestStatusCallback(liveID, platform, true, "")
+			cb(liveID, platform, true, "")
 		}
 	}
 
@@ -317,12 +339,21 @@ func (w *WrappedLive) GetInfo() (*Info, error) {
 	w.notifyWaiters(i, err)
 
 	if err != nil {
-		if info, err2 := w.cache.Get(w); err2 == nil {
-			// 将错误信息存到 LastError 而非 RoomName
-			// 避免错误文本出现在录制文件名中
-			info.(*Info).LastError = err.Error()
+		// 先给返回的 info 打上错误标记（如果有的话）
+		if i != nil {
+			i.LastError = err.Error()
 		}
-		return nil, err
+		// 更新缓存中的 LastError：
+		// - 优先更新已有缓存条目（保留其中正确的 HostName/RoomName，避免被空的覆盖）
+		// - 仅当缓存中没有条目时，才将当前 info 写入缓存
+		if w.cache != nil {
+			if cachedInfo, err2 := w.cache.Get(w); err2 == nil {
+				cachedInfo.(*Info).LastError = err.Error()
+			} else if i != nil {
+				w.cache.Set(w, i)
+			}
+		}
+		return i, err
 	}
 	if w.cache != nil {
 		// 成功获取信息，清除之前的错误
@@ -343,8 +374,8 @@ func (w *WrappedLive) GetInfo() (*Info, error) {
 
 // dispatchSchedulerRefreshEvent 发送调度器刷新完成事件
 func (w *WrappedLive) dispatchSchedulerRefreshEvent() {
-	if schedulerRefreshCallback != nil {
-		schedulerRefreshCallback(w, w.GetSchedulerStatus())
+	if cb := getSchedulerRefreshCallback(); cb != nil {
+		cb(w, w.GetSchedulerStatus())
 	}
 }
 

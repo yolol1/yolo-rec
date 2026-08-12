@@ -1,14 +1,14 @@
 //go:build windows
 
-package notify
+package utils
 
 import (
 	"syscall"
 	"unsafe"
 )
 
-// getDiskFreeSpace 获取指定路径所在磁盘的剩余可用空间（字节）
-func getDiskFreeSpace(path string) (uint64, error) {
+// GetDiskFreeSpace 获取指定路径所在磁盘的剩余可用空间（字节）
+func GetDiskFreeSpace(path string) (uint64, error) {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetDiskFreeSpaceExW")
 

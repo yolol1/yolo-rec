@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bililive-go/bililive-go/src/live"
+	"github.com/bililive-go/bililive-go/src/tools"
 )
 
 var btoolsConsts = struct {
@@ -91,6 +92,14 @@ func (l *btoolsLive) updateChannelInfo() (err error) {
 }
 
 func (l *btoolsLive) fetchChannelInfo() (channelInfo ChannelInfo, err error) {
+	// 等待 btools 启动完毕，避免启动时产生大量 connectex 报错
+	for i := 0; i < 30; i++ {
+		if tools.IsBToolsReady() {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	// 使用自定义请求以便添加认证Header
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/bgo/channel-info?url=%s", getBtoolsPort(), url.QueryEscape(l.Url.String()))
 	req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)

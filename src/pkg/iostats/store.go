@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/bililive-go/bililive-go/src/configs"
@@ -65,7 +64,6 @@ type Store interface {
 type SQLiteStore struct {
 	db     *sql.DB
 	dbPath string
-	mu     sync.RWMutex
 }
 
 // NewSQLiteStore 创建 SQLite 存储
@@ -76,14 +74,16 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	// 设置连接池参数
-	db.SetMaxOpenConns(1) // SQLite 单写入
-	db.SetMaxIdleConns(1)
+	// SQLite 在 WAL 模式下支持并发读，允许更多连接
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
 
 	store := &SQLiteStore{
 		db:     db,
@@ -119,7 +119,8 @@ func (s *SQLiteStore) runMigrations() error {
 	if recovered {
 		logrus.Info("IO 统计数据库从未完成的迁移中恢复")
 		s.db.Close()
-		db, err := sql.Open("sqlite", s.dbPath)
+		dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", s.dbPath)
+		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			return fmt.Errorf("恢复后重新打开数据库失败: %w", err)
 		}
@@ -145,8 +146,8 @@ func (s *SQLiteStore) runMigrations() error {
 
 // SaveIOStat 保存单条 IO 统计数据
 func (s *SQLiteStore) SaveIOStat(ctx context.Context, stat *IOStat) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO io_stats (timestamp, stat_type, live_id, platform, speed, total_bytes)
@@ -162,8 +163,8 @@ func (s *SQLiteStore) SaveIOStats(ctx context.Context, stats []*IOStat) error {
 		return nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -192,9 +193,6 @@ func (s *SQLiteStore) SaveIOStats(ctx context.Context, stats []*IOStat) error {
 
 // QueryIOStats 查询 IO 统计数据
 func (s *SQLiteStore) QueryIOStats(ctx context.Context, query IOStatsQuery) ([]IOStat, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	// 构建查询
 	sqlQuery := `SELECT id, timestamp, stat_type, live_id, platform, speed, total_bytes 
 				 FROM io_stats WHERE timestamp >= ? AND timestamp <= ?`
@@ -319,13 +317,13 @@ func (s *SQLiteStore) aggregateStats(stats []IOStat, aggregation string) []IOSta
 
 // SaveRequestStatus 保存请求状态
 func (s *SQLiteStore) SaveRequestStatus(ctx context.Context, status *RequestStatus) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	successInt := 0
 	if status.Success {
 		successInt = 1
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO request_status (timestamp, live_id, platform, success, error_message)
@@ -337,9 +335,6 @@ func (s *SQLiteStore) SaveRequestStatus(ctx context.Context, status *RequestStat
 
 // QueryRequestStatus 查询请求状态
 func (s *SQLiteStore) QueryRequestStatus(ctx context.Context, query RequestStatusQuery) ([]RequestStatus, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	sqlQuery := `SELECT id, timestamp, live_id, platform, success, error_message 
 				 FROM request_status WHERE timestamp >= ? AND timestamp <= ?`
 	args := []interface{}{query.StartTime, query.EndTime}
@@ -470,9 +465,6 @@ func (s *SQLiteStore) buildSegments(statuses []RequestStatus) []RequestStatusSeg
 
 // GetFilters 获取可用的筛选器选项
 func (s *SQLiteStore) GetFilters(ctx context.Context) (*FiltersResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	response := &FiltersResponse{
 		LiveIDs:   make([]string, 0),
 		Platforms: make([]string, 0),
@@ -495,6 +487,7 @@ func (s *SQLiteStore) GetFilters(ctx context.Context) (*FiltersResponse, error) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close() // 显式关闭释放连接，防止下面查询死锁
 
 	// 获取平台列表
 	rows2, err := s.db.QueryContext(ctx, `SELECT DISTINCT platform FROM request_status WHERE platform IS NOT NULL AND platform != '' ORDER BY platform`)
@@ -516,8 +509,8 @@ func (s *SQLiteStore) GetFilters(ctx context.Context) (*FiltersResponse, error) 
 
 // Cleanup 清理过期数据
 func (s *SQLiteStore) Cleanup(ctx context.Context, retentionDays int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).UnixMilli()
 
@@ -569,8 +562,8 @@ func (s *SQLiteStore) SaveDiskIOStats(ctx context.Context, stats []*DiskIOStat) 
 		return nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -604,9 +597,6 @@ func (s *SQLiteStore) SaveDiskIOStats(ctx context.Context, stats []*DiskIOStat) 
 
 // QueryDiskIOStats 查询磁盘 I/O 统计数据
 func (s *SQLiteStore) QueryDiskIOStats(ctx context.Context, query DiskIOQuery) ([]DiskIOStat, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	sqlQuery := `SELECT id, timestamp, device_name, read_count, write_count, read_bytes, write_bytes,
 				 read_time_ms, write_time_ms, avg_read_latency, avg_write_latency, read_speed, write_speed
 				 FROM disk_io_stats WHERE timestamp >= ? AND timestamp <= ?`
@@ -644,9 +634,6 @@ func (s *SQLiteStore) QueryDiskIOStats(ctx context.Context, query DiskIOQuery) (
 
 // GetDiskDevices 获取可用的磁盘设备列表
 func (s *SQLiteStore) GetDiskDevices(ctx context.Context) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT device_name FROM disk_io_stats WHERE device_name IS NOT NULL AND device_name != '' ORDER BY device_name`)
 	if err != nil {
@@ -672,8 +659,8 @@ func (s *SQLiteStore) SaveMemoryStats(ctx context.Context, stats []*MemoryStat) 
 		return nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -704,9 +691,6 @@ func (s *SQLiteStore) SaveMemoryStats(ctx context.Context, stats []*MemoryStat) 
 
 // QueryMemoryStats 查询内存统计数据
 func (s *SQLiteStore) QueryMemoryStats(ctx context.Context, query MemoryStatsQuery) (*MemoryStatsResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	sqlQuery := `SELECT id, timestamp, category, rss, vms, alloc, sys, num_gc, num_goroutine
 				 FROM memory_stats WHERE timestamp >= ? AND timestamp <= ?`
 	args := []interface{}{query.StartTime, query.EndTime}
@@ -846,9 +830,6 @@ func (s *SQLiteStore) aggregateMemoryStats(stats []MemoryStat, aggregation strin
 
 // GetMemoryCategories 获取可用的内存统计类别列表
 func (s *SQLiteStore) GetMemoryCategories(ctx context.Context) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT category FROM memory_stats WHERE category IS NOT NULL AND category != '' ORDER BY category`)
 	if err != nil {

@@ -25,8 +25,14 @@ const (
 	OptionPathTemplate = "path_template"
 	// OptionDeleteAfter 上传后是否删除
 	OptionDeleteAfter = "delete_after"
+	// OptionUploadSpeedLimit 上传速度限制 (KB/s)，0 表示不限速
+	OptionUploadSpeedLimit = "speed_limit"
+	// OptionMaxConcurrentUploads 最大并发上传数，0 表示不限制（顺序上传）
+	OptionMaxConcurrentUploads = "max_concurrent_uploads"
 	// OptionCommand 自定义命令
 	OptionCommand = "command"
+	// OptionAdditionalStorages 额外存储目标列表
+	OptionAdditionalStorages = "additional_storages"
 	// OptionFileTypes 处理的文件类型过滤
 	OptionFileTypes = "file_types"
 	// OptionCodec 视频编码器
@@ -112,13 +118,23 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 
 	// 5. 云上传
 	if legacy.CloudUpload.Enable && legacy.CloudUpload.StorageName != "" {
+		opts := map[string]any{
+			OptionStorage:      legacy.CloudUpload.StorageName,
+			OptionPathTemplate: legacy.CloudUpload.UploadPathTmpl,
+			OptionDeleteAfter:  legacy.CloudUpload.DeleteAfterUpload,
+		}
+		if legacy.CloudUpload.UploadSpeedLimit > 0 {
+			opts[OptionUploadSpeedLimit] = legacy.CloudUpload.UploadSpeedLimit
+		}
+		if legacy.CloudUpload.MaxConcurrentUploads > 0 {
+			opts[OptionMaxConcurrentUploads] = legacy.CloudUpload.MaxConcurrentUploads
+		}
+		if len(legacy.CloudUpload.AdditionalStorages) > 0 {
+			opts[OptionAdditionalStorages] = legacy.CloudUpload.AdditionalStorages
+		}
 		stages = append(stages, StageConfig{
-			Name: StageNameCloudUpload,
-			Options: map[string]any{
-				OptionStorage:      legacy.CloudUpload.StorageName,
-				OptionPathTemplate: legacy.CloudUpload.UploadPathTmpl,
-				OptionDeleteAfter:  legacy.CloudUpload.DeleteAfterUpload,
-			},
+			Name:    StageNameCloudUpload,
+			Options: opts,
 		})
 	}
 

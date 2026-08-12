@@ -97,7 +97,7 @@ func (l *InitializingLive) GetInfo() (info *live.Info, err error) {
 			RoomName:     roomName,
 			Status:       false,
 			Initializing: true,
-		}, nil // 返回 nil 错误，让上层知道这是一个有效的（初始化中的）状态
+		}, err // 向上层返回真实的错误，以便记录日志和重试机制可以正确工作
 	}
 
 	// 获取成功，标记为已完成并触发回调

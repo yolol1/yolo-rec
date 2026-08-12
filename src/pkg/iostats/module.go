@@ -2,6 +2,8 @@ package iostats
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,7 +137,9 @@ func (m *Module) doCleanup() {
 	defer cancel()
 
 	if err := m.store.Cleanup(ctx, m.config.RetentionDays); err != nil {
-		logrus.WithError(err).Error("清理过期 IO 统计数据失败")
+		if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "context deadline exceeded") {
+			logrus.WithError(err).Error("清理过期 IO 统计数据失败")
+		}
 	} else {
 		logrus.WithField("retention_days", m.config.RetentionDays).Info("已清理过期 IO 统计数据")
 	}
