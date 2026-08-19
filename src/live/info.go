@@ -61,6 +61,8 @@ type Info struct {
 	CustomLiveId         string
 	AudioOnly            bool
 	AutoRecord           bool
+	BiliPublish          bool // 房间级 B站投稿开关（房间配置解析）
+	CloudUploadEnabled   bool // 房间云上传生效状态（跟随全局或强制值）
 	// 最近一次 API 请求的错误信息（用于前端显示错误提示）
 	LastError string
 	// 可用流列表（最近一次获取的）
@@ -97,6 +99,8 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		AvailableStreams          []*AvailableStreamInfo `json:"available_streams,omitempty"`
 		AvailableStreamsUpdatedAt int64                  `json:"available_streams_updated_at,omitempty"`
 		AutoRecord                bool                   `json:"auto_record"`
+		BiliPublish               bool                   `json:"bili_publish"`
+		CloudUploadEnabled        bool                   `json:"cloud_upload_enabled"`
 	}{
 		Id:                        i.Live.GetLiveId(),
 		LiveUrl:                   i.Live.GetRawUrl(),
@@ -114,6 +118,8 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		AvailableStreams:          i.AvailableStreams,
 		AvailableStreamsUpdatedAt: i.AvailableStreamsUpdatedAt,
 		AutoRecord:                i.AutoRecord,
+		BiliPublish:               i.BiliPublish,
+		CloudUploadEnabled:        i.CloudUploadEnabled,
 	}
 	if !i.Live.GetLastStartTime().IsZero() {
 		t.LastStartTime = i.Live.GetLastStartTime().Format("2006-01-02 15:04:05")

@@ -105,6 +105,8 @@ func parseInfo(ctx context.Context, l live.Live, preFetchedRoom ...*livestate.Li
 	if cfg := configs.GetCurrentConfig(); cfg != nil {
 		if room, err := cfg.GetLiveRoomByUrl(l.GetRawUrl()); err == nil {
 			info.AutoRecord = room.IsAutoRecord()
+			info.BiliPublish = room.IsBiliPublish()
+			info.CloudUploadEnabled = room.IsCloudUploadEnabled(cfg.OnRecordFinished.CloudUpload.Enable)
 		}
 	}
 
@@ -567,6 +569,56 @@ func parseLiveAction(writer http.ResponseWriter, r *http.Request) {
 			return
 		}
 		GetSSEHub().BroadcastListChange(live.GetLiveId(), "auto_record_disable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "enable-bili-publish":
+		if _, err := configs.SetLiveRoomBiliPublish(live.GetRawUrl(), true); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("开启 B站投稿失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "bili_publish_enable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "disable-bili-publish":
+		if _, err := configs.SetLiveRoomBiliPublish(live.GetRawUrl(), false); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("关闭 B站投稿失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "bili_publish_disable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "enable-cloud-upload":
+		if _, err := configs.SetLiveRoomCloudUpload(live.GetRawUrl(), configs.BoolPtr(true)); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("强制开启云上传失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "cloud_upload_enable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "disable-cloud-upload":
+		if _, err := configs.SetLiveRoomCloudUpload(live.GetRawUrl(), configs.BoolPtr(false)); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("强制关闭云上传失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "cloud_upload_disable", map[string]interface{}{
+			"live_id": string(live.GetLiveId()),
+		})
+	case "reset-cloud-upload":
+		if _, err := configs.SetLiveRoomCloudUpload(live.GetRawUrl(), nil); err != nil {
+			resp.ErrNo = http.StatusInternalServerError
+			resp.ErrMsg = fmt.Sprintf("重置云上传开关失败: %s", err.Error())
+			writeJsonWithStatusCode(writer, http.StatusInternalServerError, resp)
+			return
+		}
+		GetSSEHub().BroadcastListChange(live.GetLiveId(), "cloud_upload_reset", map[string]interface{}{
 			"live_id": string(live.GetLiveId()),
 		})
 	case "forceRefresh":
