@@ -327,6 +327,9 @@ interface ItemData {
     lastEndTime?: string
     isLiving: boolean
     autoRecord: boolean
+    biliPublish: boolean
+    cloudUpload: boolean | null // 房间级云上传原始配置：null 跟随全局，true 强制开，false 强制关
+    cloudUploadEnabled: boolean // 当前生效状态
 }
 interface CookieItemData {
     Platform_cn_name: string,
@@ -463,6 +466,71 @@ class LiveList extends React.Component<Props, IState> {
                                                 .catch(err => alert(`开启自动录制失败:\n${err}`));
                                         }
                                     }}
+                                />
+                            </Tooltip>
+
+                            {data.address === '哔哩哔哩' && (
+                                <Tooltip title={data.biliPublish ? "关闭 B站投稿" : "开启 B站投稿（录制完成后自动发布）"}>
+                                    <Switch
+                                        checkedChildren="B站投稿"
+                                        unCheckedChildren="B站投稿"
+                                        checked={data.biliPublish}
+                                        onChange={(checked, e) => {
+                                            e.stopPropagation();
+                                            if (!checked) {
+                                                api.disableBiliPublish(data.roomId)
+                                                    .then(rsp => {
+                                                        api.saveSettingsInBackground();
+                                                        this.refresh();
+                                                    })
+                                                    .catch(err => alert(`关闭 B站投稿失败:\n${err}`));
+                                            } else {
+                                                api.enableBiliPublish(data.roomId)
+                                                    .then(rsp => {
+                                                        api.saveSettingsInBackground();
+                                                        this.refresh();
+                                                    })
+                                                    .catch(err => alert(`开启 B站投稿失败:\n${err}`));
+                                            }
+                                        }}
+                                    />
+                                </Tooltip>
+                            )}
+
+                            <Tooltip title="云上传三态开关：跟随全局 / 强制开启 / 强制关闭">
+                                <Select
+                                    size="small"
+                                    style={{ width: 122 }}
+                                    value={data.cloudUpload === null ? 'follow' : data.cloudUpload ? 'on' : 'off'}
+                                    onChange={(val) => {
+                                        if (val === 'on') {
+                                            api.enableCloudUpload(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`强制开启云上传失败:\n${err}`));
+                                        } else if (val === 'off') {
+                                            api.disableCloudUpload(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`强制关闭云上传失败:\n${err}`));
+                                        } else {
+                                            api.resetCloudUpload(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`重置云上传开关失败:\n${err}`));
+                                        }
+                                    }}
+                                    options={[
+                                        { value: 'follow', label: '上传网盘:跟随' },
+                                        { value: 'on', label: '上传网盘:强制开' },
+                                        { value: 'off', label: '上传网盘:强制关' },
+                                    ]}
                                 />
                             </Tooltip>
 
@@ -971,7 +1039,10 @@ class LiveList extends React.Component<Props, IState> {
                         roomId: item.id,
                         lastEndTime: item.last_end_time,
                         isLiving: item.status,
-                        autoRecord: item.auto_record
+                        autoRecord: item.auto_record,
+                        biliPublish: item.bili_publish,
+                        cloudUpload: item.cloud_upload === undefined ? null : item.cloud_upload,
+                        cloudUploadEnabled: item.cloud_upload_enabled
                     };
                 });
             })

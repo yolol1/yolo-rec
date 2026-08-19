@@ -289,6 +289,7 @@ class PipelineTaskList extends Component<object, PipelineTaskListState> {
       'fix_flv': '修复FLV',
       'convert_mp4': '转换MP4',
       'extract_cover': '提取封面',
+      'bili_publish': 'B站投稿',
       'cloud_upload': '云盘上传',
       'custom_command': '自定义命令',
     };

@@ -97,6 +97,46 @@ class API {
     }
 
     /**
+     * 开启 B站投稿（房间级）
+     * @param id 直播间id
+     */
+    enableBiliPublish(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/enable-bili-publish`);
+    }
+
+    /**
+     * 关闭 B站投稿（房间级）
+     * @param id 直播间id
+     */
+    disableBiliPublish(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/disable-bili-publish`);
+    }
+
+    /**
+     * 强制开启云上传（房间级，不跟随全局）
+     * @param id 直播间id
+     */
+    enableCloudUpload(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/enable-cloud-upload`);
+    }
+
+    /**
+     * 强制关闭云上传（房间级，不跟随全局）
+     * @param id 直播间id
+     */
+    disableCloudUpload(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/disable-cloud-upload`);
+    }
+
+    /**
+     * 重置云上传开关，恢复跟随全局
+     * @param id 直播间id
+     */
+    resetCloudUpload(id: string) {
+        return utils.requestGet(`${BASE_URL}/lives/${id}/reset-cloud-upload`);
+    }
+
+    /**
      * 保存设置至config文件
      */
     saveSettings() {

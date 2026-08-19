@@ -62,6 +62,7 @@ type Info struct {
 	AudioOnly            bool
 	AutoRecord           bool
 	BiliPublish          bool // 房间级 B站投稿开关（房间配置解析）
+	CloudUpload          *bool // 房间级云上传原始配置：nil 跟随全局，true 强制开启，false 强制关闭
 	CloudUploadEnabled   bool // 房间云上传生效状态（跟随全局或强制值）
 	// 最近一次 API 请求的错误信息（用于前端显示错误提示）
 	LastError string
@@ -100,6 +101,7 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		AvailableStreamsUpdatedAt int64                  `json:"available_streams_updated_at,omitempty"`
 		AutoRecord                bool                   `json:"auto_record"`
 		BiliPublish               bool                   `json:"bili_publish"`
+		CloudUpload               *bool                  `json:"cloud_upload"`
 		CloudUploadEnabled        bool                   `json:"cloud_upload_enabled"`
 	}{
 		Id:                        i.Live.GetLiveId(),
@@ -119,6 +121,7 @@ func (i *Info) MarshalJSON() ([]byte, error) {
 		AvailableStreamsUpdatedAt: i.AvailableStreamsUpdatedAt,
 		AutoRecord:                i.AutoRecord,
 		BiliPublish:               i.BiliPublish,
+		CloudUpload:               i.CloudUpload,
 		CloudUploadEnabled:        i.CloudUploadEnabled,
 	}
 	if !i.Live.GetLastStartTime().IsZero() {

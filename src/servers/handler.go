@@ -106,6 +106,7 @@ func parseInfo(ctx context.Context, l live.Live, preFetchedRoom ...*livestate.Li
 		if room, err := cfg.GetLiveRoomByUrl(l.GetRawUrl()); err == nil {
 			info.AutoRecord = room.IsAutoRecord()
 			info.BiliPublish = room.IsBiliPublish()
+			info.CloudUpload = room.CloudUpload
 			info.CloudUploadEnabled = room.IsCloudUploadEnabled(cfg.OnRecordFinished.CloudUpload.Enable)
 		}
 	}

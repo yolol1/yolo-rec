@@ -24,6 +24,7 @@ import {
   OutputTemplatePreview, getFFmpegInheritance, getFFmpegDisplayValue,
 } from './shared-fields';
 import CloudUploadSettings from './CloudUploadSettings';
+import BiliPublishSettings from './BiliPublishSettings';
 
 const api = new API();
 const { TextArea } = Input;
@@ -768,6 +769,9 @@ const GlobalSettings: React.FC<{
             </Form.Item>
           </ConfigField>
         </Card>
+
+        {/* B站投稿设置（先于云盘上传执行） */}
+        <BiliPublishSettings config={config} />
 
         {/* 云盘上传设置 */}
         <CloudUploadSettings config={config} />
