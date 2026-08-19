@@ -11,6 +11,7 @@ const (
 	StageNameConvertTs     = "convert_ts"
 	StageNameExtractCover  = "extract_cover"
 	StageNameCloudUpload   = "cloud_upload"
+	StageNameBiliPublish   = "bili_publish"
 	StageNameCustomCmd     = "custom_command"
 	StageNameBurnSubtitles = "burn_subtitles"
 )
@@ -45,6 +46,18 @@ const (
 	OptionBurnDeleteAss = "burn_delete_ass"
 	// OptionBurnDeleteSource 烧录后是否删除源视频文件
 	OptionBurnDeleteSource = "burn_delete_source"
+	// OptionTitleTmpl 投稿标题模板
+	OptionTitleTmpl = "title_tmpl"
+	// OptionDescTmpl 投稿简介模板
+	OptionDescTmpl = "desc_tmpl"
+	// OptionTid B站分区 tid
+	OptionTid = "tid"
+	// OptionTags 投稿标签列表
+	OptionTags = "tags"
+	// OptionDTime 定时发布时间（RFC3339，留空立即发布）
+	OptionDTime = "dtime"
+	// OptionCoverExtracted 是否使用 extract_cover 阶段生成的封面
+	OptionCoverExtracted = "cover_use_extracted"
 )
 
 // OnRecordFinishedPipeline 扩展版的录制完成后配置

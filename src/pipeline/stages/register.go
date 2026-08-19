@@ -23,6 +23,9 @@ func RegisterBuiltinStages(executor *pipeline.Executor) {
 	// 云上传
 	executor.RegisterStage(pipeline.StageNameCloudUpload, NewCloudUploadStage)
 
+	// B站投稿
+	executor.RegisterStage(pipeline.StageNameBiliPublish, NewBiliPublishStage)
+
 	// 自定义命令
 	executor.RegisterStage(pipeline.StageNameCustomCmd, NewCustomCommandStage)
 
@@ -52,6 +55,9 @@ func RegisterBuiltinStagesToManager(manager *pipeline.Manager) {
 
 	// 云上传
 	manager.RegisterStage(pipeline.StageNameCloudUpload, NewCloudUploadStage)
+
+	// B站投稿
+	manager.RegisterStage(pipeline.StageNameBiliPublish, NewBiliPublishStage)
 
 	// 自定义命令
 	manager.RegisterStage(pipeline.StageNameCustomCmd, NewCustomCommandStage)
