@@ -812,6 +812,9 @@ func addLiveImpl(ctx context.Context, urlStr string, isListen bool) (info *live.
 	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "https://" + urlStr
 	}
+	// 归一化直播间 URL：去除分享链接附带的冗余跟踪参数（如抖音的长串 query），
+	// 确保存储、展示和通知统一使用标准 URL
+	urlStr = configs.NormalizeLiveRoomURL(urlStr)
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, errors.New("can't parse url: " + urlStr)

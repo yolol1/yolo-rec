@@ -815,6 +815,38 @@ func (l *LiveRoom) IsAutoRecord() bool {
 	return *l.AutoRecord
 }
 
+// normalizeLiveRoomURLHosts 需要去除跟踪参数（query string）的平台域名白名单。
+// 这些平台的房间 ID 完全由 URL 路径决定，query 只是分享/跳转时附带的冗余跟踪参数；
+// 例如抖音直播链接 https://live.douyin.com/123?enter_from_merge=... 中的长串参数均为冗余信息。
+// 其他平台保持原样，避免破坏依赖 query 参数解析房间的逻辑（如红逗 fm 的 roomId 参数）。
+var normalizeLiveRoomURLHosts = map[string]bool{
+	"live.douyin.com": true,
+	"v.douyin.com":    true,
+}
+
+// NormalizeLiveRoomURL 归一化直播间 URL：
+// 对白名单中的平台去除 query string（跟踪参数），
+// 确保新添加的链接以标准 URL 形式存储、展示和通知，而不是原样保存长串冗余参数。
+// 解析失败或无需清理时原样返回，不影响原逻辑。
+func NormalizeLiveRoomURL(urlStr string) string {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return urlStr
+	}
+	if !normalizeLiveRoomURLHosts[u.Host] {
+		return urlStr
+	}
+	// 根路径（如 https://live.douyin.com/）没有房间 ID，无需处理
+	if u.Path == "" || u.Path == "/" {
+		return urlStr
+	}
+	if u.RawQuery == "" {
+		return urlStr
+	}
+	u.RawQuery = ""
+	return u.String()
+}
+
 type liveRoomAlias LiveRoom
 
 // allow both string and LiveRoom format in config
@@ -829,6 +861,8 @@ func (l *LiveRoom) UnmarshalYAML(unmarshal func(any) error) error {
 		}
 		liveRoomAlias.Url = url
 	}
+	// 归一化直播间 URL，去除冗余跟踪参数
+	liveRoomAlias.Url = NormalizeLiveRoomURL(liveRoomAlias.Url)
 	*l = LiveRoom(liveRoomAlias)
 
 	return nil
@@ -840,7 +874,7 @@ func NewLiveRoomsWithStrings(strings []string) []LiveRoom {
 	}
 	liveRooms := make([]LiveRoom, len(strings))
 	for index, url := range strings {
-		liveRooms[index].Url = url
+		liveRooms[index].Url = NormalizeLiveRoomURL(url)
 		liveRooms[index].IsListening = true
 		liveRooms[index].Quality = 0
 	}
