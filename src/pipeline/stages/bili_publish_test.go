@@ -75,7 +75,6 @@ func TestBiliPublishStageSkipRoomNotEnabled(t *testing.T) {
 
 func TestBiliPublishStageFailWithoutCookie(t *testing.T) {
 	cfg := configs.NewConfig()
-	cfg.OnRecordFinished.BiliPublish.Enable = true
 	cfg.OnRecordFinished.BiliPublish.TitleTmpl = "标题"
 	cfg.OnRecordFinished.BiliPublish.Tid = 21
 	cfg.LiveRooms = []configs.LiveRoom{
@@ -91,7 +90,8 @@ func TestBiliPublishStageFailWithoutCookie(t *testing.T) {
 	ctx := newPipelineContext("哔哩哔哩", "https://live.bilibili.com/123")
 	input := []pipeline.FileInfo{{Path: videoPath, Type: pipeline.FileTypeVideo}}
 	_, err := stage.Execute(ctx, input)
-	// 房间和全局开关都已开启，但未配置 Cookie → 投稿失败（而不是跳过）
+	// 房间开关已开启且阶段已被插入（迁移时按构建配置判断），执行时不再检查全局开关；
+	// 未配置 Cookie → 投稿失败（而不是跳过）
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "B站投稿失败")
 }

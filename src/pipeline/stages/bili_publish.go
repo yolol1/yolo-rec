@@ -66,11 +66,11 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 	}
 
 	cfg := configs.GetCurrentConfig()
-	if !cfg.OnRecordFinished.BiliPublish.Enable {
+	if cfg == nil {
 		s.mu.Lock()
-		s.logs += "B站投稿: 全局开关未开启，跳过\n"
+		s.logs += "B站投稿: 全局配置不可用，跳过\n"
 		s.mu.Unlock()
-		ctx.Logger.Infof("B站投稿: 全局开关未开启，跳过")
+		ctx.Logger.Infof("B站投稿: 全局配置不可用，跳过")
 		return input, nil
 	}
 
@@ -202,6 +202,9 @@ func (s *BiliPublishStage) shouldPublishForRoom(ctx *pipeline.PipelineContext) b
 		return false
 	}
 	cfg := configs.GetCurrentConfig()
+	if cfg == nil {
+		return false
+	}
 	room, err := cfg.GetLiveRoomByUrl(ctx.RecordInfo.LiveURL)
 	if err != nil {
 		return false
