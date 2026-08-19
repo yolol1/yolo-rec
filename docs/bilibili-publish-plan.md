@@ -197,25 +197,26 @@ func (sc *StageConfig) ShouldContinueOnFailure() bool { ... } // nil 默认 fals
 
 1. `src/pipeline/config.go`：
    - `OnRecordFinishedPipeline` 增加 `BiliPublish configs.BiliPublish` 字段。
-   - `ConvertLegacyConfig` 在云上传之后、自定义命令之前追加：
+   - `ConvertLegacyConfig` 在封面提取之后、云上传之前插入（投稿先于云上传，保证云上传删除本地文件前投稿已完成）：
      ```go
      if legacy.BiliPublish.Enable {
          stages = append(stages, StageConfig{
              Name:               StageNameBiliPublish,
-             ContinueOnFailure:  pipeline.BoolPtr(true), // 投稿失败不阻断云上传
+             ContinueOnFailure:  pipeline.EnabledPtr(true), // 投稿失败不阻断云上传
              Options: map[string]any{
                  OptionTitleTmpl:      legacy.BiliPublish.TitleTmpl,
                  OptionDescTmpl:       legacy.BiliPublish.DescTmpl,
                  OptionTid:            legacy.BiliPublish.Tid,
                  OptionTags:           legacy.BiliPublish.Tags,
                  OptionDTime:          legacy.BiliPublish.DTime,
-                 OptionDeleteAfter:    legacy.BiliPublish.DeleteAfter,
                  OptionCoverExtracted: legacy.BiliPublish.CoverUseExtracted,
+                 OptionDeleteAfter:    legacy.BiliPublish.DeleteAfter,
              },
          })
      }
      ```
    - 云上传阶段的插入条件由 `Enable && StorageName != ""` 调整为 `StorageName != ""`（只要有存储目标即插入阶段），是否实际上传由阶段内"全局开关 + 房间级三态"最终判定。这样"房间级强制开启"在全局关闭时也能生效；未配置任何存储目标时仍不插入（现状不变）。
+   - 云上传阶段与 B站投稿阶段均设置 `ContinueOnFailure: pipeline.EnabledPtr(true)`，任一失败不阻断其他阶段，但任务最终标记失败。
    - 新增阶段名常量 `StageNameBiliPublish = "bili_publish"` 与选项键常量。
 2. `src/pipeline/stages/register.go`：**两处**注册函数都增加 `executor.RegisterStage(pipeline.StageNameBiliPublish, NewBiliPublishStage)`。
 3. `src/configs/config.go`：新增 `BiliPublish` 结构、默认值、`SetLiveRoomBiliPublish`、`SetLiveRoomCloudUpload`，`LiveRoom` 新增 `BiliPublish *bool` 与 `CloudUpload *bool` 字段，并在配置注释（`config_comments.go`）与 `config.yml` 示例中补充说明。

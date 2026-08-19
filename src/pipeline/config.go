@@ -70,6 +70,7 @@ type OnRecordFinishedPipeline struct {
 	FixFlvAtFirst         bool                 `yaml:"fix_flv_at_first,omitempty" json:"fix_flv_at_first,omitempty"`
 	SaveCover             bool                 `yaml:"save_cover,omitempty" json:"save_cover,omitempty"`
 	CloudUpload           configs.CloudUpload  `yaml:"cloud_upload,omitempty" json:"cloud_upload,omitempty"`
+	BiliPublish           configs.BiliPublish  `yaml:"bili_publish,omitempty" json:"bili_publish,omitempty"`
 	UploadTiming          configs.UploadTiming `yaml:"upload_timing,omitempty" json:"upload_timing,omitempty"`
 	BurnSubtitles         bool                 `yaml:"burn_subtitles,omitempty" json:"burn_subtitles,omitempty"`
 	BurnSubtitlesCodec    string               `yaml:"burn_subtitles_codec,omitempty" json:"burn_subtitles_codec,omitempty"`
@@ -129,8 +130,28 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 		})
 	}
 
-	// 5. 云上传
-	if legacy.CloudUpload.Enable && legacy.CloudUpload.StorageName != "" {
+	// 5. B站投稿（在云上传之前执行，确保云上传删除本地文件前投稿已完成）
+	if legacy.BiliPublish.Enable {
+		opts := map[string]any{
+			OptionTitleTmpl:      legacy.BiliPublish.TitleTmpl,
+			OptionDescTmpl:       legacy.BiliPublish.DescTmpl,
+			OptionTid:            legacy.BiliPublish.Tid,
+			OptionTags:           legacy.BiliPublish.Tags,
+			OptionDTime:          legacy.BiliPublish.DTime,
+			OptionCoverExtracted: legacy.BiliPublish.CoverUseExtracted,
+			OptionDeleteAfter:    legacy.BiliPublish.DeleteAfter,
+		}
+		stages = append(stages, StageConfig{
+			Name:              StageNameBiliPublish,
+			Options:           opts,
+			ContinueOnFailure: EnabledPtr(true), // 投稿失败不阻断后续云上传
+		})
+	}
+
+	// 6. 云上传
+	// 条件仅看是否配置了存储目标：即使全局开关关闭，房间级强制开启仍可生效；
+	// 未配置存储目标时不插入，避免空阶段
+	if legacy.CloudUpload.StorageName != "" {
 		opts := map[string]any{
 			OptionStorage:      legacy.CloudUpload.StorageName,
 			OptionPathTemplate: legacy.CloudUpload.UploadPathTmpl,
@@ -146,12 +167,13 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 			opts[OptionAdditionalStorages] = legacy.CloudUpload.AdditionalStorages
 		}
 		stages = append(stages, StageConfig{
-			Name:    StageNameCloudUpload,
-			Options: opts,
+			Name:              StageNameCloudUpload,
+			Options:           opts,
+			ContinueOnFailure: EnabledPtr(true), // 云上传失败不影响其他已完成的阶段
 		})
 	}
 
-	// 6. 自定义命令（在最后执行）
+	// 7. 自定义命令（在最后执行）
 	if legacy.CustomCommandline != "" {
 		stages = append(stages, StageConfig{
 			Name: StageNameCustomCmd,
