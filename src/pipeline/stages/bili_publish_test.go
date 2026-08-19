@@ -95,3 +95,31 @@ func TestBiliPublishStageFailWithoutCookie(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "B站投稿失败")
 }
+
+func TestCollectVideoFilesSortsByName(t *testing.T) {
+	input := []pipeline.FileInfo{
+		{Path: filepath.Join("rec", "b.flv"), Type: pipeline.FileTypeVideo},
+		{Path: filepath.Join("rec", "a.flv"), Type: pipeline.FileTypeVideo},
+		{Path: filepath.Join("rec", "cover.jpg"), Type: pipeline.FileTypeCover},
+	}
+	videos := collectVideoFiles(input)
+	assert.Len(t, videos, 2)
+	assert.Equal(t, "a.flv", filepath.Base(videos[0].Path))
+	assert.Equal(t, "b.flv", filepath.Base(videos[1].Path))
+}
+
+func TestFindCoverForVideo(t *testing.T) {
+	input := []pipeline.FileInfo{
+		{Path: "a.flv", Type: pipeline.FileTypeVideo},
+		{Path: "a.jpg", Type: pipeline.FileTypeCover, SourcePath: "a.flv"},
+		{Path: "b.jpg", Type: pipeline.FileTypeCover, SourcePath: "b.flv"},
+	}
+	cover := findCoverForVideo(input, "a.flv")
+	assert.NotNil(t, cover)
+	assert.Equal(t, "a.jpg", cover.Path)
+
+	// 找不到关联封面时回退到第一个封面
+	cover = findCoverForVideo(input, "missing.flv")
+	assert.NotNil(t, cover)
+	assert.Equal(t, "a.jpg", cover.Path)
+}

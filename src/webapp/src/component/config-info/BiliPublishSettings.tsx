@@ -154,6 +154,14 @@ const BiliPublishSettings: React.FC<BiliPublishSettingsProps> = ({ config }) => 
         </Form.Item>
       </ConfigField>
       <ConfigField
+        label="分P标题模板"
+        description="多文件投稿（分段录制）时每个分P的标题。额外支持 {{ .Index }}（从 1 开始的分P序号）；留空则所有分P使用主标题"
+      >
+        <Form.Item name={['on_record_finished', 'bili_publish', 'p_title_tmpl']} noStyle>
+          <Input placeholder='{{ .HostName }} {{ now | date "2006-01-02" }} 第 {{ .Index }} 部分' style={{ width: 400 }} />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
         label="简介模板"
         description="投稿简介，支持与标题相同的模板变量"
       >

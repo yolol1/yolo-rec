@@ -48,6 +48,8 @@ const (
 	OptionBurnDeleteSource = "burn_delete_source"
 	// OptionTitleTmpl 投稿标题模板
 	OptionTitleTmpl = "title_tmpl"
+	// OptionPTitleTmpl 投稿分P标题模板（多文件投稿时每个分P的标题，留空使用主标题）
+	OptionPTitleTmpl = "p_title_tmpl"
 	// OptionDescTmpl 投稿简介模板
 	OptionDescTmpl = "desc_tmpl"
 	// OptionTid B站分区 tid
@@ -134,6 +136,7 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 	if legacy.BiliPublish.Enable {
 		opts := map[string]any{
 			OptionTitleTmpl:      legacy.BiliPublish.TitleTmpl,
+			OptionPTitleTmpl:     legacy.BiliPublish.PTitleTmpl,
 			OptionDescTmpl:       legacy.BiliPublish.DescTmpl,
 			OptionTid:            legacy.BiliPublish.Tid,
 			OptionTags:           legacy.BiliPublish.Tags,

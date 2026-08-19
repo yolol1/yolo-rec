@@ -298,6 +298,7 @@ type CloudUpload struct {
 type BiliPublish struct {
 	Enable            bool     `yaml:"enable" json:"enable"`                             // 是否启用 B站投稿
 	TitleTmpl         string   `yaml:"title_tmpl" json:"title_tmpl"`                     // 投稿标题模板
+	PTitleTmpl        string   `yaml:"p_title_tmpl,omitempty" json:"p_title_tmpl,omitempty"` // 分P标题模板（多文件投稿时每个分P的标题，留空使用主标题）
 	DescTmpl          string   `yaml:"desc_tmpl" json:"desc_tmpl"`                       // 投稿简介模板
 	Tid               int      `yaml:"tid" json:"tid"`                                   // B站分区 tid（21 = 直播）
 	Tags              []string `yaml:"tags,omitempty" json:"tags,omitempty"`             // 标签（最多 12 个）

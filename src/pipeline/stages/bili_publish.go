@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
@@ -21,6 +22,7 @@ import (
 type BiliPublishStage struct {
 	config            pipeline.StageConfig
 	titleTemplate     string   // 标题模板
+	pTitleTemplate    string   // 分P标题模板（多文件投稿时每个分P的标题，留空使用主标题）
 	descTemplate      string   // 简介模板
 	tid               int      // B站分区 tid
 	tags              []string // 标签
@@ -37,6 +39,7 @@ func NewBiliPublishStage(config pipeline.StageConfig) (pipeline.Stage, error) {
 	return &BiliPublishStage{
 		config:            config,
 		titleTemplate:     config.GetStringOption(pipeline.OptionTitleTmpl, ""),
+		pTitleTemplate:    config.GetStringOption(pipeline.OptionPTitleTmpl, ""),
 		descTemplate:      config.GetStringOption(pipeline.OptionDescTmpl, ""),
 		tid:               config.GetIntOption(pipeline.OptionTid, 0),
 		tags:              config.GetStringSliceOption(pipeline.OptionTags),
@@ -74,45 +77,41 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 		return input, nil
 	}
 
-	// 从输入中查找视频文件和封面文件
-	var videoFile *pipeline.FileInfo
-	var coverFile *pipeline.FileInfo
-	for i := range input {
-		switch input[i].Type {
-		case pipeline.FileTypeVideo:
-			if videoFile == nil {
-				f := input[i]
-				videoFile = &f
-			}
-		case pipeline.FileTypeCover:
-			if coverFile == nil {
-				f := input[i]
-				coverFile = &f
-			}
-		}
-	}
-	if videoFile == nil {
+	// 收集所有视频文件（多文件将作为同一稿件的多个分P），按文件名排序保持分段顺序
+	videoFiles := collectVideoFiles(input)
+	if len(videoFiles) == 0 {
 		s.logs = "B站投稿: 没有找到视频文件，跳过"
 		ctx.Logger.Warnf("B站投稿: 没有找到视频文件，跳过")
 		return input, nil
 	}
-	if _, err := os.Stat(videoFile.Path); os.IsNotExist(err) {
-		s.mu.Lock()
-		s.logs += fmt.Sprintf("B站投稿: 视频文件不存在: %s\n", videoFile.Path)
-		s.mu.Unlock()
-		ctx.Logger.Warnf("B站投稿: 视频文件不存在: %s", videoFile.Path)
+
+	// 过滤已不存在的视频文件（如前置阶段已删除源文件），全部不存在则跳过
+	existingVideos := make([]pipeline.FileInfo, 0, len(videoFiles))
+	for _, vf := range videoFiles {
+		if _, err := os.Stat(vf.Path); os.IsNotExist(err) {
+			s.mu.Lock()
+			s.logs += fmt.Sprintf("B站投稿: 视频文件不存在，跳过该分P: %s\n", vf.Path)
+			s.mu.Unlock()
+			ctx.Logger.Warnf("B站投稿: 视频文件不存在，跳过该分P: %s", vf.Path)
+			continue
+		}
+		existingVideos = append(existingVideos, vf)
+	}
+	if len(existingVideos) == 0 {
+		s.logs = "B站投稿: 所有视频文件都不存在，跳过"
+		ctx.Logger.Warnf("B站投稿: 所有视频文件都不存在，跳过")
 		return input, nil
 	}
 
 	// 渲染标题和简介模板
-	title, err := s.renderTemplate(ctx, s.titleTemplate, *videoFile)
+	title, err := s.renderTemplate(ctx, s.titleTemplate, existingVideos[0], 0)
 	if err != nil {
 		s.mu.Lock()
 		s.logs += fmt.Sprintf("❌ 标题模板渲染失败: %s\n", err.Error())
 		s.mu.Unlock()
 		return input, fmt.Errorf("B站投稿: 标题模板渲染失败: %w", err)
 	}
-	desc, err := s.renderTemplate(ctx, s.descTemplate, *videoFile)
+	desc, err := s.renderTemplate(ctx, s.descTemplate, existingVideos[0], 0)
 	if err != nil {
 		s.mu.Lock()
 		s.logs += fmt.Sprintf("❌ 简介模板渲染失败: %s\n", err.Error())
@@ -132,19 +131,39 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 		}
 	}
 
+	// 组装每个分P
 	req := bilipublish.PublishRequest{
-		FilePath: videoFile.Path,
-		Title:    title,
-		Desc:     desc,
-		Tid:      s.tid,
-		Tags:     s.tags,
-		DTime:    publishTime,
+		Title: title,
+		Desc:  desc,
+		Tid:   s.tid,
+		Tags:  s.tags,
+		DTime: publishTime,
+	}
+	for i, vf := range existingVideos {
+		pTitle := title
+		if strings.TrimSpace(s.pTitleTemplate) != "" {
+			pTitle, err = s.renderTemplate(ctx, s.pTitleTemplate, vf, i+1)
+			if err != nil {
+				s.mu.Lock()
+				s.logs += fmt.Sprintf("❌ 分P %d 标题模板渲染失败: %s\n", i+1, err.Error())
+				s.mu.Unlock()
+				return input, fmt.Errorf("B站投稿: 分P %d 标题模板渲染失败: %w", i+1, err)
+			}
+		}
+		req.Files = append(req.Files, bilipublish.PublishFile{
+			FilePath: vf.Path,
+			Title:    pTitle,
+			Desc:     desc,
+		})
 	}
 
-	// 封面：仅当配置启用且存在提取的封面文件时才上传
-	if s.coverUseExtracted && coverFile != nil {
-		if _, err := os.Stat(coverFile.Path); err == nil {
-			req.CoverPath = coverFile.Path
+	// 封面：仅当配置启用且存在提取的封面文件时才上传。
+	// 优先取与第一个分P关联的封面，找不到时回退到第一个封面文件
+	if s.coverUseExtracted {
+		if cover := findCoverForVideo(input, existingVideos[0].Path); cover != nil {
+			if _, err := os.Stat(cover.Path); err == nil {
+				req.CoverPath = cover.Path
+			}
 		}
 	}
 
@@ -153,10 +172,13 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 	client := bilipublish.NewClient(cookie)
 
 	s.mu.Lock()
-	s.logs += fmt.Sprintf("开始投稿: %s\n标题: %s\n", filepath.Base(videoFile.Path), title)
-	s.commands = append(s.commands, fmt.Sprintf("publish %s to bilibili", videoFile.Path))
+	s.logs += fmt.Sprintf("开始投稿: 共 %d 个分P\n标题: %s\n", len(req.Files), title)
+	for i, f := range req.Files {
+		s.logs += fmt.Sprintf("分P %d/%d: %s\n", i+1, len(req.Files), filepath.Base(f.FilePath))
+	}
+	s.commands = append(s.commands, fmt.Sprintf("publish %d file(s) to bilibili", len(req.Files)))
 	s.mu.Unlock()
-	ctx.Logger.Infof("B站投稿: 开始投稿 %s（标题: %s）", videoFile.Path, title)
+	ctx.Logger.Infof("B站投稿: 开始投稿 %d 个分P（标题: %s）", len(req.Files), title)
 
 	result, err := client.Publish(ctx.Ctx, req)
 	if err != nil {
@@ -169,21 +191,23 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 	}
 
 	s.mu.Lock()
-	s.logs += fmt.Sprintf("✅ 投稿成功: BV%s (av%d)\n", result.BVID, result.AID)
+	s.logs += fmt.Sprintf("✅ 投稿成功: BV%s (av%d)，共 %d 个分P\n", result.BVID, result.AID, len(req.Files))
 	s.mu.Unlock()
-	ctx.Logger.Infof("B站投稿: 投稿成功 BV%s (av%d)", result.BVID, result.AID)
+	ctx.Logger.Infof("B站投稿: 投稿成功 BV%s (av%d)，共 %d 个分P", result.BVID, result.AID, len(req.Files))
 
-	// 投稿成功后按配置删除本地视频文件
+	// 投稿成功后按配置删除本地视频文件（逐个删除，删除失败只记录日志不阻断）
 	if s.deleteAfter {
-		if err := os.Remove(videoFile.Path); err != nil {
-			s.mu.Lock()
-			s.logs += fmt.Sprintf("⚠️ 删除本地视频失败: %s (%s)\n", filepath.Base(videoFile.Path), err.Error())
-			s.mu.Unlock()
-			ctx.Logger.Warnf("B站投稿: 删除本地视频失败 %s: %v", videoFile.Path, err)
-		} else {
-			s.mu.Lock()
-			s.logs += fmt.Sprintf("🗑️ 已删除本地视频: %s\n", filepath.Base(videoFile.Path))
-			s.mu.Unlock()
+		for _, f := range req.Files {
+			if err := os.Remove(f.FilePath); err != nil {
+				s.mu.Lock()
+				s.logs += fmt.Sprintf("⚠️ 删除本地视频失败: %s (%s)\n", filepath.Base(f.FilePath), err.Error())
+				s.mu.Unlock()
+				ctx.Logger.Warnf("B站投稿: 删除本地视频失败 %s: %v", f.FilePath, err)
+			} else {
+				s.mu.Lock()
+				s.logs += fmt.Sprintf("🗑️ 已删除本地视频: %s\n", filepath.Base(f.FilePath))
+				s.mu.Unlock()
+			}
 		}
 	}
 
@@ -212,9 +236,40 @@ func (s *BiliPublishStage) shouldPublishForRoom(ctx *pipeline.PipelineContext) b
 	return room.IsBiliPublish()
 }
 
-// renderTemplate 渲染投稿模板（标题/简介）
-// 支持 {{ .Platform }}、{{ .HostName }}、{{ .RoomName }}、{{ .FileName }}、{{ .Ext }}、{{ .StartTime }} 等
-func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplText string, file pipeline.FileInfo) (string, error) {
+// collectVideoFiles 收集输入中的视频文件并按文件名排序（保持分段顺序）
+func collectVideoFiles(input []pipeline.FileInfo) []pipeline.FileInfo {
+	var videos []pipeline.FileInfo
+	for _, f := range input {
+		if f.Type == pipeline.FileTypeVideo {
+			videos = append(videos, f)
+		}
+	}
+	sort.SliceStable(videos, func(i, j int) bool {
+		return filepath.Base(videos[i].Path) < filepath.Base(videos[j].Path)
+	})
+	return videos
+}
+
+// findCoverForVideo 查找与指定视频关联的封面文件（extract_cover 生成的封面 SourcePath 指向源视频）
+func findCoverForVideo(input []pipeline.FileInfo, videoPath string) *pipeline.FileInfo {
+	for i := range input {
+		if input[i].Type == pipeline.FileTypeCover && input[i].SourcePath == videoPath {
+			return &input[i]
+		}
+	}
+	// 回退：取第一个封面文件
+	for i := range input {
+		if input[i].Type == pipeline.FileTypeCover {
+			return &input[i]
+		}
+	}
+	return nil
+}
+
+// renderTemplate 渲染投稿模板（标题/简介/分P标题）
+// 支持 {{ .Platform }}、{{ .HostName }}、{{ .RoomName }}、{{ .FileName }}、{{ .Ext }}、{{ .StartTime }}、{{ .Index }} 等
+// index 为分P序号（从 1 开始），主标题/简介传 0
+func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplText string, file pipeline.FileInfo, index int) (string, error) {
 	if strings.TrimSpace(tmplText) == "" {
 		return "", nil
 	}
@@ -230,6 +285,7 @@ func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplTex
 		FileName  string
 		Ext       string
 		StartTime time.Time
+		Index     int
 	}{
 		Platform:  ctx.RecordInfo.Platform,
 		HostName:  ctx.RecordInfo.HostName,
@@ -237,6 +293,7 @@ func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplTex
 		FileName:  filepath.Base(file.Path),
 		Ext:       ext,
 		StartTime: ctx.RecordInfo.StartTime,
+		Index:     index,
 	}
 
 	cfg := configs.GetCurrentConfig()

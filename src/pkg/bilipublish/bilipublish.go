@@ -114,16 +114,25 @@ func (c *Client) Verify(ctx context.Context) (NavResult, error) {
 	return result.Data, nil
 }
 
+// PublishFile 单个分P的视频文件
+type PublishFile struct {
+	FilePath string // 视频文件路径
+	FileName string // 上传文件名（含扩展名），为空则取视频文件 basename
+	Title    string // 分P标题（提交时作为 videos[].title）
+	Desc     string // 分P描述
+}
+
 // PublishRequest 投稿请求参数
 type PublishRequest struct {
-	FilePath  string    // 视频文件路径
-	CoverPath string    // 封面文件路径（可选，为空则不传封面）
-	FileName  string    // 上传文件名（含扩展名），为空则取视频文件 basename
-	Title     string    // 稿件标题（不超过 80 字）
-	Desc      string    // 稿件简介
-	Tid       int       // B站分区 tid（如 21 = 直播）
-	Tags      []string  // 标签（最多 12 个）
-	DTime     time.Time // 定时发布时间，零值表示立即发布
+	Files     []PublishFile // 待投稿的视频文件（一个或多个，多文件将作为同一稿件的多个分P）
+	FilePath  string        // 兼容单文件调用：Files 为空时使用此字段
+	FileName  string        // 兼容单文件调用
+	CoverPath string        // 封面文件路径（可选，为空则不传封面）
+	Title     string        // 稿件标题（不超过 80 字）
+	Desc      string        // 稿件简介
+	Tid       int           // B站分区 tid（如 21 = 直播）
+	Tags      []string      // 标签（最多 12 个）
+	DTime     time.Time     // 定时发布时间，零值表示立即发布
 }
 
 // PublishResult 投稿结果
@@ -150,31 +159,55 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (PublishResult
 	if len(req.Tags) > maxTagCount {
 		return PublishResult{}, fmt.Errorf("标签数量超过 %d 个上限（当前 %d 个）", maxTagCount, len(req.Tags))
 	}
-	if req.FileName == "" {
-		req.FileName = filepath.Base(req.FilePath)
-	}
-	if req.FileName == "" {
-		return PublishResult{}, errors.New("无法确定投稿文件名")
+
+	files, err := normalizePublishFiles(req)
+	if err != nil {
+		return PublishResult{}, err
 	}
 
-	info, err := os.Stat(req.FilePath)
-	if err != nil {
-		return PublishResult{}, fmt.Errorf("读取视频文件失败: %w", err)
-	}
-	if info.Size() <= 0 {
-		return PublishResult{}, errors.New("视频文件为空，无法投稿")
-	}
+	// 依次上传每个分P，全部成功后再统一提交稿件
+	// 任一文件失败都会中断且不会提交，不会产生"部分分P"的稿件
+	videos := make([]map[string]interface{}, 0, len(files))
+	for i, f := range files {
+		part := i + 1
+		if strings.TrimSpace(f.Title) != "" {
+			if runes := len([]rune(f.Title)); runes > maxTitleRunes {
+				return PublishResult{}, fmt.Errorf("分P %d 标题超过 %d 字上限（当前 %d 字）", part, maxTitleRunes, runes)
+			}
+		}
+		fileName := f.FileName
+		if fileName == "" {
+			fileName = filepath.Base(f.FilePath)
+		}
+		if fileName == "" {
+			return PublishResult{}, fmt.Errorf("分P %d: 无法确定投稿文件名", part)
+		}
 
-	session, err := c.preupload(ctx, req.FileName, info.Size())
-	if err != nil {
-		return PublishResult{}, err
-	}
-	if err := c.uploadParts(ctx, req.FilePath, session); err != nil {
-		return PublishResult{}, err
-	}
-	cid, err := c.finishUpload(ctx, session)
-	if err != nil {
-		return PublishResult{}, err
+		info, err := os.Stat(f.FilePath)
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("分P %d: 读取视频文件失败: %w", part, err)
+		}
+		if info.Size() <= 0 {
+			return PublishResult{}, fmt.Errorf("分P %d: 视频文件为空，无法投稿", part)
+		}
+
+		session, err := c.preupload(ctx, fileName, info.Size())
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("分P %d: %w", part, err)
+		}
+		if err := c.uploadParts(ctx, f.FilePath, session); err != nil {
+			return PublishResult{}, fmt.Errorf("分P %d: %w", part, err)
+		}
+		cid, err := c.finishUpload(ctx, session)
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("分P %d: %w", part, err)
+		}
+		videos = append(videos, map[string]interface{}{
+			"filename": strings.TrimPrefix(session.uposURI, "upos://"),
+			"title":    f.Title,
+			"desc":     f.Desc,
+			"cid":      cid,
+		})
 	}
 
 	// 可选封面上传：封面文件不存在时静默跳过
@@ -188,7 +221,24 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (PublishResult
 		}
 	}
 
-	return c.submit(ctx, req, session, cid, coverURL)
+	return c.submit(ctx, req.Title, req.Desc, req.Tid, req.Tags, req.DTime, videos, coverURL)
+}
+
+// normalizePublishFiles 规整待投稿文件列表：
+// 优先使用 Files；兼容旧的单文件字段（FilePath/FileName）
+func normalizePublishFiles(req PublishRequest) ([]PublishFile, error) {
+	if len(req.Files) > 0 {
+		return req.Files, nil
+	}
+	if strings.TrimSpace(req.FilePath) != "" {
+		return []PublishFile{{
+			FilePath: req.FilePath,
+			FileName: req.FileName,
+			Title:    req.Title,
+			Desc:     req.Desc,
+		}}, nil
+	}
+	return nil, errors.New("没有待投稿的视频文件")
 }
 
 // uploadSession 一次上传会话的中间状态
@@ -396,23 +446,16 @@ func (c *Client) uploadCover(ctx context.Context, coverPath string) (string, err
 }
 
 // submit 提交稿件（add/v3）
-func (c *Client) submit(ctx context.Context, req PublishRequest, s *uploadSession, cid, coverURL string) (PublishResult, error) {
+func (c *Client) submit(ctx context.Context, title, desc string, tid int, tags []string, dtime time.Time, videos []map[string]interface{}, coverURL string) (PublishResult, error) {
 	body := map[string]interface{}{
-		"videos": []map[string]interface{}{
-			{
-				"filename": strings.TrimPrefix(s.uposURI, "upos://"),
-				"title":    req.Title,
-				"desc":     req.Desc,
-				"cid":      cid,
-			},
-		},
+		"videos":             videos,
 		"cover":              coverURL,
-		"title":              req.Title,
+		"title":              title,
 		"copyright":          1, // 自制
-		"tid":                req.Tid,
-		"tag":                strings.Join(req.Tags, ","),
+		"tid":                tid,
+		"tag":                strings.Join(tags, ","),
 		"desc_format_id":     9999,
-		"desc":               req.Desc,
+		"desc":               desc,
 		"recreate":           -1,
 		"dynamic":            "",
 		"interactive":        0,
@@ -428,8 +471,8 @@ func (c *Client) submit(ctx context.Context, req PublishRequest, s *uploadSessio
 		"web_os":             3,
 		"csrf":               c.csrf,
 	}
-	if !req.DTime.IsZero() {
-		body["dtime"] = req.DTime.Format("2006-01-02 15:04:05")
+	if !dtime.IsZero() {
+		body["dtime"] = dtime.Format("2006-01-02 15:04:05")
 	}
 
 	payload, err := json.Marshal(body)

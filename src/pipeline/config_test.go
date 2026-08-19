@@ -16,8 +16,9 @@ func TestConvertLegacyConfigOrder(t *testing.T) {
 			StorageName: "115",
 		},
 		BiliPublish: configs.BiliPublish{
-			Enable: true,
-			Tid:    21,
+			Enable:     true,
+			Tid:        21,
+			PTitleTmpl: "{{ .Index }} {{ .FileName }}",
 		},
 	}
 	cfg := ConvertLegacyConfig(legacy)
@@ -38,6 +39,7 @@ func TestConvertLegacyConfigOrder(t *testing.T) {
 	bp := cfg.Stages[1]
 	assert.True(t, bp.ShouldContinueOnFailure())
 	assert.Equal(t, 21, bp.GetIntOption(OptionTid, 0))
+	assert.Equal(t, "{{ .Index }} {{ .FileName }}", bp.GetStringOption(OptionPTitleTmpl, ""))
 	assert.Equal(t, "echo done", cfg.Stages[3].GetStringOption(OptionCommand, ""))
 
 	// 云上传阶段：选项正确且失败继续

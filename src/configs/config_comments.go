@@ -79,6 +79,7 @@ func DecorateConfigNode(node *yaml.Node) {
 # 注意：还需在直播间列表中单独开启指定房间的"投稿B站"开关才会实际投稿`
 			setFieldComment(biliPublishNode, "enable", "# 是否启用B站投稿（总开关，仍需房间级开关配合）", "")
 			setFieldComment(biliPublishNode, "title_tmpl", "# 投稿标题模板，支持 {{ .HostName }}、{{ .RoomName }}、{{ now }} 等变量", "")
+			setFieldComment(biliPublishNode, "p_title_tmpl", "# 分P标题模板（多文件投稿时每个分P的标题），支持 {{ .Index }}、{{ .FileName }}，留空使用主标题", "")
 			setFieldComment(biliPublishNode, "desc_tmpl", "# 投稿简介模板，支持同上变量", "")
 			setFieldComment(biliPublishNode, "tid", "# B站分区 tid（21 = 直播，其他分区请自行查询）", "")
 			setFieldComment(biliPublishNode, "tags", "# 投稿标签，最多 12 个", "")

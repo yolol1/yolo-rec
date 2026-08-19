@@ -59,6 +59,7 @@ on_record_finished:
   bili_publish:
     enable: false
     title_tmpl: '{{ .HostName }} {{ now | date "2006-01-02" }} 直播录像'
+    p_title_tmpl: ""
     desc_tmpl: 本视频由 bililive-go 自动录制并投稿。
     tid: 21
     tags: []
