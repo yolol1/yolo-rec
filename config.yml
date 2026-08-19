@@ -53,19 +53,19 @@ on_record_finished:
     delete_after_upload: false
     upload_speed_limit: 0
     max_concurrent_uploads: 0
-  # B站投稿配置
-  # 启用后录制完成的视频会自动投稿到 B站
-  # 注意：还需在直播间列表中单独开启指定房间的"投稿B站"开关才会实际投稿
   bili_publish:
+    # 是否启用B站投稿（总开关，仍需房间级开关配合）
     enable: false
+    # 投稿标题模板，支持 {{ .HostName }}、{{ .RoomName }}、{{ now }} 等变量
     title_tmpl: '{{ .HostName }} {{ now | date "2006-01-02" }} 直播录像'
+    # 投稿简介模板，支持同上变量
     desc_tmpl: 本视频由 bililive-go 自动录制并投稿。
+    # B站分区 tid（21 = 直播，其他分区请自行查询）
     tid: 21
-    tags: []
+    # 优先使用 extract_cover 阶段生成的封面（需同时开启 save_cover）
     cover_use_extracted: true
-    dtime: ""
+    # 投稿成功后是否删除本地文件，默认 false
     delete_after: false
-    cookie: ""
   upload_timing: after_process
   # 是否将 ASS 弹幕字幕硬编码（烧录）到视频中
   # 开启后会使用 FFmpeg 重编码视频，将字幕叠加到画面上
