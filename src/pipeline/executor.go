@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,7 @@ func (e *Executor) Execute(
 	files := initialFiles
 	results := make([]StageResult, 0, len(config.Stages))
 	stageIndex := 0
+	var continueFailures []string
 
 	for i, stageCfg := range config.Stages {
 		// 检查上下文是否已取消
@@ -116,7 +118,15 @@ func (e *Executor) Execute(
 				onProgress(stageIndex, stageCfg.Name, StageStatusFailed)
 			}
 
-			return results, fmt.Errorf("stage %s failed: %w", stageCfg.Name, err)
+			if !stageCfg.ShouldContinueOnFailure() {
+				return results, fmt.Errorf("stage %s failed: %w", stageCfg.Name, err)
+			}
+
+			// 失败继续：记录失败结果，保留原输入文件继续执行后续阶段
+			continueFailures = append(continueFailures, fmt.Sprintf("%s: %v", stageCfg.Name, err))
+			e.logger.WithField("stage", stageCfg.Name).Warn("stage failed but continue_on_failure is enabled, continuing pipeline")
+			stageIndex++
+			continue
 		}
 
 		result.Status = StageStatusCompleted
@@ -139,6 +149,9 @@ func (e *Executor) Execute(
 		}).Debug("stage completed")
 	}
 
+	if len(continueFailures) > 0 {
+		return results, fmt.Errorf("pipeline finished with failed stage(s): %s", strings.Join(continueFailures, "; "))
+	}
 	return results, nil
 }
 

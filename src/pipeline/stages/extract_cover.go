@@ -141,6 +141,17 @@ func (s *CloudUploadStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 	}
 
 	cfg := configs.GetCurrentConfig()
+
+	// 房间级云上传开关：nil 跟随全局；true 强制开启；false 强制关闭
+	// 无法匹配到房间时回退跟随全局，保持存量行为不变
+	if !s.shouldUploadForRoom(ctx, cfg) {
+		s.mu.Lock()
+		s.logs += fmt.Sprintf("云上传: 该房间未开启云上传（房间级开关），跳过\n")
+		s.mu.Unlock()
+		ctx.Logger.Infof("云上传: 房间级开关已关闭（URL=%s），跳过上传", ctx.RecordInfo.LiveURL)
+		return input, nil
+	}
+
 	apiUrl := cfg.OnRecordFinished.CloudUpload.ApiUrl
 	username := cfg.OnRecordFinished.CloudUpload.Username
 	password := cfg.OnRecordFinished.CloudUpload.Password
@@ -461,6 +472,21 @@ func (s *CloudUploadStage) sortFilesBySize(files []pipeline.FileInfo) []pipeline
 		return sizeI < sizeJ
 	})
 	return sorted
+}
+
+// shouldUploadForRoom 根据房间级云上传开关决定是否上传：
+// 房间级 nil 跟随全局；true 强制开启；false 强制关闭。
+// 无法匹配到房间（LiveURL 为空或房间已删除）时回退跟随全局，保持存量行为不变。
+func (s *CloudUploadStage) shouldUploadForRoom(ctx *pipeline.PipelineContext, cfg *configs.Config) bool {
+	globalEnabled := cfg.OnRecordFinished.CloudUpload.Enable
+	if ctx.RecordInfo.LiveURL == "" {
+		return globalEnabled
+	}
+	room, err := cfg.GetLiveRoomByUrl(ctx.RecordInfo.LiveURL)
+	if err != nil {
+		return globalEnabled
+	}
+	return room.IsCloudUploadEnabled(globalEnabled)
 }
 
 // sortOutputLikeInput 将 output 按 input 中的原始顺序排列

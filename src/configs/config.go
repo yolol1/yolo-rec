@@ -294,6 +294,19 @@ type CloudUpload struct {
 	AdditionalStorages   []string `yaml:"additional_storages,omitempty" json:"additional_storages,omitempty"` // 额外存储（支持多目标上传）
 }
 
+// BiliPublish B站投稿配置
+type BiliPublish struct {
+	Enable            bool     `yaml:"enable" json:"enable"`                             // 是否启用 B站投稿
+	TitleTmpl         string   `yaml:"title_tmpl" json:"title_tmpl"`                     // 投稿标题模板
+	DescTmpl          string   `yaml:"desc_tmpl" json:"desc_tmpl"`                       // 投稿简介模板
+	Tid               int      `yaml:"tid" json:"tid"`                                   // B站分区 tid（21 = 直播）
+	Tags              []string `yaml:"tags,omitempty" json:"tags,omitempty"`             // 标签（最多 12 个）
+	CoverUseExtracted bool     `yaml:"cover_use_extracted" json:"cover_use_extracted"`   // 优先使用 extract_cover 阶段生成的封面
+	DTime             string   `yaml:"dtime,omitempty" json:"dtime,omitempty"`           // 定时发布（RFC3339，留空立即发布）
+	DeleteAfter       bool     `yaml:"delete_after" json:"delete_after"`                 // 投稿成功后删除本地文件
+	Cookie            string   `yaml:"cookie,omitempty" json:"cookie,omitempty"`         // 显式 Cookie（留空则复用全局 Cookies）
+}
+
 // On record finished actions.
 type OnRecordFinished struct {
 	ConvertToMp4          bool         `yaml:"convert_to_mp4" json:"convert_to_mp4"`
@@ -302,6 +315,7 @@ type OnRecordFinished struct {
 	FixFlvAtFirst         bool         `yaml:"fix_flv_at_first" json:"fix_flv_at_first"`
 	SaveCover             bool         `yaml:"save_cover" json:"save_cover"`                       // 保存视频第一帧作为封面图（.jpg）
 	CloudUpload           CloudUpload  `yaml:"cloud_upload" json:"cloud_upload"`                   // 云上传配置
+	BiliPublish           BiliPublish  `yaml:"bili_publish" json:"bili_publish"`                   // B站投稿配置
 	UploadTiming          UploadTiming `yaml:"upload_timing" json:"upload_timing"`                 // 上传时机
 	BurnSubtitles         bool         `yaml:"burn_subtitles" json:"burn_subtitles"`               // 烧录弹幕字幕到视频（硬编码）
 	BurnSubtitlesCodec    string       `yaml:"burn_subtitles_codec" json:"burn_subtitles_codec"`   // 烧录用视频编码器，默认 libx264
@@ -783,6 +797,27 @@ func SetLiveRoomAutoRecord(url string, autoRecord bool) (*Config, error) {
 	}, 3, 10*time.Millisecond)
 }
 
+// SetLiveRoomBiliPublish 设置指定 URL 的房间 B站投稿状态
+func SetLiveRoomBiliPublish(url string, publish bool) (*Config, error) {
+	return UpdateWithRetry(func(c *Config) error {
+		if room, err := c.GetLiveRoomByUrl(url); err == nil {
+			room.BiliPublish = &publish
+		}
+		return nil
+	}, 3, 10*time.Millisecond)
+}
+
+// SetLiveRoomCloudUpload 设置指定 URL 的房间云上传状态
+// enabled 为 nil 表示跟随全局
+func SetLiveRoomCloudUpload(url string, enabled *bool) (*Config, error) {
+	return UpdateWithRetry(func(c *Config) error {
+		if room, err := c.GetLiveRoomByUrl(url); err == nil {
+			room.CloudUpload = enabled
+		}
+		return nil
+	}, 3, 10*time.Millisecond)
+}
+
 // SetLiveRoomId 设置指定 URL 的房间的 LiveId
 // LiveId 不持久化，因此使用 Transient 更新
 func SetLiveRoomId(url string, id types.LiveID) (*Config, error) {
@@ -798,6 +833,8 @@ type LiveRoom struct {
 	Url         string       `yaml:"url" json:"url"`
 	IsListening bool         `yaml:"is_listening" json:"is_listening"`
 	AutoRecord  *bool        `yaml:"auto_record,omitempty" json:"auto_record,omitempty"`
+	BiliPublish *bool        `yaml:"bili_publish,omitempty" json:"bili_publish,omitempty"` // 是否投稿到 B站（nil = 不投稿）
+	CloudUpload *bool        `yaml:"cloud_upload,omitempty" json:"cloud_upload,omitempty"` // 云上传开关（nil = 跟随全局，true = 强制开启，false = 强制关闭）
 	LiveId      types.LiveID `yaml:"-" json:"live_id,omitempty"`
 	Quality     int          `yaml:"quality,omitempty" json:"quality,omitempty"`
 	AudioOnly   bool         `yaml:"audio_only,omitempty" json:"audio_only,omitempty"`
@@ -813,6 +850,23 @@ func (l *LiveRoom) IsAutoRecord() bool {
 		return true
 	}
 	return *l.AutoRecord
+}
+
+// IsBiliPublish 返回房间是否启用 B站投稿（nil 表示不投稿，安全默认）
+func (l *LiveRoom) IsBiliPublish() bool {
+	if l.BiliPublish == nil {
+		return false
+	}
+	return *l.BiliPublish
+}
+
+// IsCloudUploadEnabled 返回房间云上传是否生效：
+// nil 跟随全局；true 强制开启；false 强制关闭
+func (l *LiveRoom) IsCloudUploadEnabled(globalEnabled bool) bool {
+	if l.CloudUpload == nil {
+		return globalEnabled
+	}
+	return *l.CloudUpload
 }
 
 // normalizeLiveRoomURLHosts 需要去除跟踪参数（query string）的平台域名白名单。
@@ -915,6 +969,14 @@ var defaultConfig = Config{
 			StorageName:       "",
 			UploadPathTmpl:    "/录播归档/{{ .Platform }}/{{ .HostName }}/{{ .RoomName }}-{{ now | date \"2006-01-02\" }}.{{ .Ext }}",
 			DeleteAfterUpload: false,
+		},
+		BiliPublish: BiliPublish{
+			Enable:            false,
+			TitleTmpl:         "{{ .HostName }} {{ now | date \"2006-01-02\" }} 直播录像",
+			DescTmpl:          "本视频由 bililive-go 自动录制并投稿。",
+			Tid:               21,
+			CoverUseExtracted: true,
+			DeleteAfter:       false,
 		},
 		UploadTiming:        UploadTimingAfterProcess,
 		BurnSubtitles:       false,
@@ -1230,6 +1292,10 @@ func cloneOnRecordFinished(src OnRecordFinished) OnRecordFinished {
 	if src.CloudUpload.AdditionalStorages != nil {
 		dst.CloudUpload.AdditionalStorages = make([]string, len(src.CloudUpload.AdditionalStorages))
 		copy(dst.CloudUpload.AdditionalStorages, src.CloudUpload.AdditionalStorages)
+	}
+	if src.BiliPublish.Tags != nil {
+		dst.BiliPublish.Tags = make([]string, len(src.BiliPublish.Tags))
+		copy(dst.BiliPublish.Tags, src.BiliPublish.Tags)
 	}
 	return dst
 }

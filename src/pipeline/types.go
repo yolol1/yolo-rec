@@ -56,6 +56,7 @@ func NewCoverFileInfo(path, sourcePath string) FileInfo {
 // RecordInfo 录制信息
 type RecordInfo struct {
 	LiveID    types.LiveID `json:"live_id"`
+	LiveURL   string       `json:"live_url,omitempty"` // 直播间 URL（用于匹配房间级配置）
 	Platform  string       `json:"platform"`
 	HostName  string       `json:"host_name"`
 	RoomName  string       `json:"room_name"`
@@ -70,6 +71,7 @@ func NewRecordInfo(info *live.Info) RecordInfo {
 	}
 	return RecordInfo{
 		LiveID:    info.Live.GetLiveId(),
+		LiveURL:   info.Live.GetRawUrl(),
 		Platform:  info.Live.GetPlatformCNName(),
 		HostName:  info.HostName,
 		RoomName:  info.RoomName,
@@ -105,10 +107,11 @@ type StageFactory func(config StageConfig) (Stage, error)
 
 // StageConfig 阶段配置（用于 YAML/JSON 配置）
 type StageConfig struct {
-	Name     string         `yaml:"name" json:"name"`                   // 阶段名称
-	Enabled  *bool          `yaml:"enabled,omitempty" json:"enabled"`   // 是否启用（nil 表示 true）
-	Parallel []StageConfig  `yaml:"parallel,omitempty" json:"parallel"` // 并行执行的子阶段
-	Options  map[string]any `yaml:"options,omitempty" json:"options"`   // 阶段特定选项
+	Name              string         `yaml:"name" json:"name"`                             // 阶段名称
+	Enabled           *bool          `yaml:"enabled,omitempty" json:"enabled"`             // 是否启用（nil 表示 true）
+	ContinueOnFailure *bool          `yaml:"continue_on_failure,omitempty" json:"continue_on_failure,omitempty"` // 失败后是否继续执行后续阶段（nil 表示 false）
+	Parallel          []StageConfig  `yaml:"parallel,omitempty" json:"parallel"`           // 并行执行的子阶段
+	Options           map[string]any `yaml:"options,omitempty" json:"options"`             // 阶段特定选项
 }
 
 // IsEnabled 检查阶段是否启用
@@ -118,6 +121,15 @@ func (sc *StageConfig) IsEnabled() bool {
 	}
 	return *sc.Enabled
 }
+
+// ShouldContinueOnFailure 检查阶段失败后是否继续执行后续阶段
+func (sc *StageConfig) ShouldContinueOnFailure() bool {
+	if sc.ContinueOnFailure == nil {
+		return false
+	}
+	return *sc.ContinueOnFailure
+}
+
 
 // IsParallel 检查是否为并行阶段
 func (sc *StageConfig) IsParallel() bool {
