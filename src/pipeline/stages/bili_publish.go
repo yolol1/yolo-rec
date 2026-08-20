@@ -2,9 +2,11 @@ package stages
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -29,10 +31,27 @@ type BiliPublishStage struct {
 	dtime             string   // 定时发布时间（RFC3339，留空立即发布）
 	coverUseExtracted bool     // 是否使用提取的封面
 	deleteAfter       bool     // 投稿成功后删除本地视频
+	seasonTmpl        string   // 合集标题模板（留空表示不加入合集）
+	noDynamic         bool     // 是否不产生投稿动态
 	commands          []string
 	logs              string
 	mu                sync.Mutex // 保护 logs 和 commands 的并发写入
 }
+
+// seasonCacheEntry 进程内合集缓存条目
+type seasonCacheEntry struct {
+	seasonID  int64
+	sectionID int64
+	fetchedAt time.Time
+}
+
+var (
+	seasonCacheMu  sync.Mutex
+	seasonCache    = make(map[string]seasonCacheEntry)
+	seasonCacheTTL = 30 * time.Minute
+	// seasonDefaultCover 创建合集时未提取到封面使用的占位图
+	seasonDefaultCover = "https://static.hdslb.com/images/transparent.gif"
+)
 
 // NewBiliPublishStage 创建 B站投稿阶段工厂
 func NewBiliPublishStage(config pipeline.StageConfig) (pipeline.Stage, error) {
@@ -46,6 +65,8 @@ func NewBiliPublishStage(config pipeline.StageConfig) (pipeline.Stage, error) {
 		dtime:             config.GetStringOption(pipeline.OptionDTime, ""),
 		coverUseExtracted: config.GetBoolOption(pipeline.OptionCoverExtracted, true),
 		deleteAfter:       config.GetBoolOption(pipeline.OptionDeleteAfter, false),
+		seasonTmpl:        config.GetStringOption(pipeline.OptionSeasonTmpl, ""),
+		noDynamic:         config.GetBoolOption(pipeline.OptionNoDynamic, true),
 	}, nil
 }
 
@@ -157,19 +178,61 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 		})
 	}
 
+	// 解析 Cookie 并创建投稿客户端
+	cookie := bilipublish.ResolveCookie(cfg.OnRecordFinished.BiliPublish, cfg.Cookies)
+	client := bilipublish.NewClient(cookie)
+
 	// 封面：仅当配置启用且存在提取的封面文件时才上传。
-	// 优先取与第一个分P关联的封面，找不到时回退到第一个封面文件
+	// 优先取与第一个分P关联的封面，找不到时回退到第一个封面文件。
+	// 上传成功后同时用于合集封面与稿件封面，避免重复上传
+	coverURL := ""
 	if s.coverUseExtracted {
 		if cover := findCoverForVideo(input, existingVideos[0].Path); cover != nil {
 			if _, err := os.Stat(cover.Path); err == nil {
-				req.CoverPath = cover.Path
+				uploaded, err := client.UploadCover(ctx.Ctx, cover.Path)
+				if err != nil {
+					s.mu.Lock()
+					s.logs += fmt.Sprintf("⚠️ 封面上传失败（继续投稿）: %s\n", err.Error())
+					s.mu.Unlock()
+					ctx.Logger.Warnf("B站投稿: 封面上传失败（继续投稿）: %v", err)
+				} else {
+					coverURL = uploaded
+				}
 			}
 		}
 	}
 
-	// 解析 Cookie 并创建投稿客户端
-	cookie := bilipublish.ResolveCookie(cfg.OnRecordFinished.BiliPublish, cfg.Cookies)
-	client := bilipublish.NewClient(cookie)
+	// 合集：按模板渲染合集标题，存在同名合集则复用，否则创建
+	// 合集解析失败只记录警告，不阻断投稿
+	seasonTitle := ""
+	if strings.TrimSpace(s.seasonTmpl) != "" {
+		seasonTitle, err = s.renderTemplate(ctx, s.seasonTmpl, existingVideos[0], 0)
+		if err != nil {
+			s.mu.Lock()
+			s.logs += fmt.Sprintf("⚠️ 合集标题模板渲染失败（本次不入合集）: %s\n", err.Error())
+			s.mu.Unlock()
+			ctx.Logger.Warnf("B站投稿: 合集标题模板渲染失败（本次不入合集）: %v", err)
+		}
+	}
+	if seasonTitle != "" {
+		season, err := resolveSeason(ctx.Ctx, client, seasonTitle, coverURL)
+		if err != nil {
+			s.mu.Lock()
+			s.logs += fmt.Sprintf("⚠️ 合集解析/创建失败（本次不入合集）: %s\n", err.Error())
+			s.mu.Unlock()
+			ctx.Logger.Warnf("B站投稿: 合集解析/创建失败（本次不入合集）: %v", err)
+		} else {
+			req.SeasonSectionID = season.SectionID
+			s.mu.Lock()
+			s.logs += fmt.Sprintf("合集: %s（ID=%d）\n", season.Title, season.ID)
+			s.mu.Unlock()
+		}
+	}
+
+	req.NoDynamic = s.noDynamic
+	if coverURL != "" {
+		req.CoverURL = coverURL
+	}
 
 	s.mu.Lock()
 	s.logs += fmt.Sprintf("开始投稿: 共 %d 个分P\n标题: %s\n", len(req.Files), title)
@@ -192,8 +255,14 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 
 	s.mu.Lock()
 	s.logs += fmt.Sprintf("✅ 投稿成功: BV%s (av%d)，共 %d 个分P\n", result.BVID, result.AID, len(req.Files))
+	if result.Warning != "" {
+		s.logs += fmt.Sprintf("⚠️ %s\n", result.Warning)
+	}
 	s.mu.Unlock()
 	ctx.Logger.Infof("B站投稿: 投稿成功 BV%s (av%d)，共 %d 个分P", result.BVID, result.AID, len(req.Files))
+	if result.Warning != "" {
+		ctx.Logger.Warnf("B站投稿: %s", result.Warning)
+	}
 
 	// 投稿成功后按配置删除本地视频文件（逐个删除，删除失败只记录日志不阻断）
 	if s.deleteAfter {
@@ -233,6 +302,46 @@ func (s *BiliPublishStage) shouldPublishForRoom(ctx *pipeline.PipelineContext) b
 	return room.IsBiliPublish()
 }
 
+// resolveSeason 按标题解析合集：存在同名合集则复用，否则创建。
+// 结果做进程内缓存（TTL 30 分钟），避免每次投稿都查询合集列表
+func resolveSeason(ctx context.Context, client *bilipublish.Client, title, coverURL string) (bilipublish.Season, error) {
+	seasonCacheMu.Lock()
+	if entry, ok := seasonCache[title]; ok && time.Since(entry.fetchedAt) < seasonCacheTTL {
+		seasonCacheMu.Unlock()
+		return bilipublish.Season{ID: entry.seasonID, Title: title, SectionID: entry.sectionID}, nil
+	}
+	seasonCacheMu.Unlock()
+
+	seasons, err := client.ListSeasons(ctx)
+	if err != nil {
+		return bilipublish.Season{}, err
+	}
+	for _, season := range seasons {
+		if season.Title == title && season.SectionID > 0 {
+			seasonCacheMu.Lock()
+			seasonCache[title] = seasonCacheEntry{seasonID: season.ID, sectionID: season.SectionID, fetchedAt: time.Now()}
+			seasonCacheMu.Unlock()
+			return season, nil
+		}
+	}
+
+	cover := coverURL
+	if cover == "" {
+		cover = seasonDefaultCover
+	}
+	season, err := client.CreateSeason(ctx, title, "", cover)
+	if err != nil {
+		return bilipublish.Season{}, err
+	}
+	if season.SectionID <= 0 {
+		return bilipublish.Season{}, fmt.Errorf("合集 %q 缺少小节 ID，无法加入", title)
+	}
+	seasonCacheMu.Lock()
+	seasonCache[title] = seasonCacheEntry{seasonID: season.ID, sectionID: season.SectionID, fetchedAt: time.Now()}
+	seasonCacheMu.Unlock()
+	return season, nil
+}
+
 // collectVideoFiles 收集输入中的视频文件并按文件名排序（保持分段顺序）
 func collectVideoFiles(input []pipeline.FileInfo) []pipeline.FileInfo {
 	var videos []pipeline.FileInfo
@@ -263,8 +372,43 @@ func findCoverForVideo(input []pipeline.FileInfo, videoPath string) *pipeline.Fi
 	return nil
 }
 
+// parseFileTime 从录制文件名中解析录制时间。
+// 默认命名模板形如 [2026-08-20 20-00-05][主播][房间].flv，
+// 时间就"附带"在文件名方括号里；解析失败时回退文件修改时间，再回退整场直播开始时间
+func parseFileTime(filePath string, fallback time.Time) time.Time {
+	base := filepath.Base(filePath)
+	timeRe := regexp.MustCompile(`(\d{4}-\d{2}-\d{2})[ _](\d{2})[-:](\d{2})(?:[-:](\d{2}))?`)
+	if m := timeRe.FindStringSubmatch(base); m != nil {
+		for _, layout := range []string{
+			"2006-01-02 15-04-05",
+			"2006-01-02_15-04-05",
+			"2006-01-02 15:04:05",
+			"2006-01-02_15:04:05",
+			"2006-01-02 15:04",
+			"2006-01-02_15:04",
+		} {
+			if t, err := time.ParseInLocation(layout, m[0], time.Local); err == nil {
+				return t
+			}
+		}
+	}
+	// 兜底1：文件名中只带日期的形式
+	dateRe := regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
+	if m := dateRe.FindStringSubmatch(base); m != nil {
+		if t, err := time.ParseInLocation("2006-01-02", m[1], time.Local); err == nil {
+			return t
+		}
+	}
+	// 兜底2：文件修改时间
+	if info, err := os.Stat(filePath); err == nil && !info.ModTime().IsZero() {
+		return info.ModTime()
+	}
+	return fallback
+}
+
 // renderTemplate 渲染投稿模板（标题/简介/分P标题）
-// 支持 {{ .Platform }}、{{ .HostName }}、{{ .RoomName }}、{{ .FileName }}、{{ .Ext }}、{{ .StartTime }}、{{ .Index }} 等
+// 支持 {{ .Platform }}、{{ .HostName }}、{{ .RoomName }}、{{ .FileName }}、{{ .Ext }}、
+// {{ .StartTime }}、{{ .FileTime }}、{{ .Index }} 等
 // index 为分P序号（从 1 开始），主标题/简介传 0
 func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplText string, file pipeline.FileInfo, index int) (string, error) {
 	if strings.TrimSpace(tmplText) == "" {
@@ -282,6 +426,7 @@ func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplTex
 		FileName  string
 		Ext       string
 		StartTime time.Time
+		FileTime  time.Time
 		Index     int
 	}{
 		Platform:  ctx.RecordInfo.Platform,
@@ -290,6 +435,7 @@ func (s *BiliPublishStage) renderTemplate(ctx *pipeline.PipelineContext, tmplTex
 		FileName:  filepath.Base(file.Path),
 		Ext:       ext,
 		StartTime: ctx.RecordInfo.StartTime,
+		FileTime:  parseFileTime(file.Path, ctx.RecordInfo.StartTime),
 		Index:     index,
 	}
 

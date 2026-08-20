@@ -14,6 +14,21 @@ func TestNewConfig(t *testing.T) {
 	assert.Equal(t, file, c.File)
 }
 
+func TestDefaultBiliPublish(t *testing.T) {
+	c := NewConfig()
+	bp := c.OnRecordFinished.BiliPublish
+	// 默认标题模板不含平台名，使用主播名(房间名)+录制文件时间
+	assert.Contains(t, bp.TitleTmpl, "{{ .HostName }}")
+	assert.Contains(t, bp.TitleTmpl, "{{ .FileTime")
+	assert.NotContains(t, bp.TitleTmpl, ".Platform")
+	// 分P标题默认使用录制文件时间
+	assert.Contains(t, bp.PTitleTmpl, "{{ .FileTime")
+	// 同一主播自动加入同名合集（默认开启）
+	assert.Contains(t, bp.SeasonTmpl, "{{ .HostName }}")
+	// 默认不产生投稿动态
+	assert.True(t, bp.NoDynamic)
+}
+
 func TestRPC_Verify(t *testing.T) {
 	var rpc *RPC
 	assert.NoError(t, rpc.verify())

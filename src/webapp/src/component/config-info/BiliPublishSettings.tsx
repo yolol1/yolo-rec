@@ -147,18 +147,18 @@ const BiliPublishSettings: React.FC<BiliPublishSettingsProps> = ({ config }) => 
       </ConfigField>
       <ConfigField
         label="标题模板"
-        description='支持变量: {{ .Platform }}, {{ .HostName }}, {{ .RoomName }}, {{ .FileName }}, {{ .Ext }}, {{ .StartTime }}，以及 {{ now | date "2006-01-02" }} 等函数'
+        description='支持变量: {{ .HostName }}, {{ .RoomName }}, {{ .FileTime }}（录制文件时间）, {{ .FileName }}, {{ .StartTime }}，以及 {{ now | date "2006-01-02" }} 等函数'
       >
         <Form.Item name={['on_record_finished', 'bili_publish', 'title_tmpl']} noStyle>
-          <Input placeholder='{{ .HostName }} {{ now | date "2006-01-02" }} 直播录像' style={{ width: 400 }} />
+          <Input placeholder='{{ .HostName }}（{{ .RoomName }}）{{ .FileTime | date "2006-01-02 15:04" }}' style={{ width: 400 }} />
         </Form.Item>
       </ConfigField>
       <ConfigField
         label="分P标题模板"
-        description="多文件投稿（分段录制）时每个分P的标题。额外支持 {{ .Index }}（从 1 开始的分P序号）；留空则所有分P使用主标题"
+        description='多文件投稿（分段录制）时每个分P的标题，默认使用该分P录制文件的时间（精确到分钟）。额外支持 {{ .Index }}（从 1 开始的分P序号）；留空则所有分P使用主标题'
       >
         <Form.Item name={['on_record_finished', 'bili_publish', 'p_title_tmpl']} noStyle>
-          <Input placeholder='{{ .HostName }} {{ now | date "2006-01-02" }} 第 {{ .Index }} 部分' style={{ width: 400 }} />
+          <Input placeholder='{{ .FileTime | date "2006-01-02 15:04" }}' style={{ width: 400 }} />
         </Form.Item>
       </ConfigField>
       <ConfigField
@@ -196,6 +196,22 @@ const BiliPublishSettings: React.FC<BiliPublishSettingsProps> = ({ config }) => 
         description="开启后使用 extract_cover 阶段生成的封面；未提取到封面或未开启封面提取时投稿不带封面"
       >
         <Form.Item name={['on_record_finished', 'bili_publish', 'cover_use_extracted']} valuePropName="checked" noStyle>
+          <Switch />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
+        label="合集标题模板"
+        description='同一主播的录像会自动加入同名合集（不存在则自动创建），留空表示不加入合集。支持 {{ .HostName }}、{{ .RoomName }} 等变量'
+      >
+        <Form.Item name={['on_record_finished', 'bili_publish', 'season_tmpl']} noStyle>
+          <Input placeholder='{{ .HostName }} 直播录播' style={{ width: 400 }} />
+        </Form.Item>
+      </ConfigField>
+      <ConfigField
+        label="不产生投稿动态"
+        description="投稿后不推送投稿动态到关注者，默认开启"
+      >
+        <Form.Item name={['on_record_finished', 'bili_publish', 'no_dynamic']} valuePropName="checked" initialValue={true} noStyle>
           <Switch />
         </Form.Item>
       </ConfigField>

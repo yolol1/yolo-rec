@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bililive-go/bililive-go/src/configs"
 	"github.com/bililive-go/bililive-go/src/pipeline"
@@ -147,4 +148,45 @@ func TestFindCoverForVideo(t *testing.T) {
 	cover = findCoverForVideo(input, "missing.flv")
 	assert.NotNil(t, cover)
 	assert.Equal(t, "a.jpg", cover.Path)
+}
+
+func TestParseFileTime(t *testing.T) {
+	fallback := time.Date(2026, 8, 1, 10, 0, 0, 0, time.Local)
+
+	// 默认命名模板：方括号内的 [2006-01-02 15-04-05]
+	got := parseFileTime(filepath.Join("rec", "[2026-08-20 20-00-05][主播][房间].flv"), fallback)
+	assert.Equal(t, "2026-08-20 20:00:05", got.Format("2006-01-02 15:04:05"))
+
+	// 下划线分隔的日期与时间
+	got = parseFileTime(filepath.Join("rec", "[2026-08-20_20-00-05][主播][房间].flv"), fallback)
+	assert.Equal(t, "2026-08-20 20:00:05", got.Format("2006-01-02 15:04:05"))
+
+	// 冒号分隔、无秒（精确到分钟）
+	got = parseFileTime(filepath.Join("rec", "[2026-08-20 20:00][主播][房间].flv"), fallback)
+	assert.Equal(t, "2026-08-20 20:00", got.Format("2006-01-02 15:04"))
+
+	// 文件名无时间信息：回退传入的整场直播开始时间
+	got = parseFileTime(filepath.Join("rec", "part1.flv"), fallback)
+	assert.Equal(t, "2026-08-01 10:00:00", got.Format("2006-01-02 15:04:05"))
+}
+
+func TestRenderTemplateFileTime(t *testing.T) {
+	cfg := configs.NewConfig()
+	configs.SetCurrentConfig(cfg)
+
+	stage := newBiliPublishStage().(*BiliPublishStage)
+	ctx := newPipelineContext("哔哩哔哩", "https://live.bilibili.com/123")
+	ctx.RecordInfo.HostName = "主播A"
+	ctx.RecordInfo.RoomName = "直播标题"
+	ctx.RecordInfo.StartTime = time.Date(2026, 8, 20, 12, 0, 0, 0, time.Local)
+
+	file := pipeline.FileInfo{Path: filepath.Join("rec", "[2026-08-20 20-00-05][主播A][直播标题].flv"), Type: pipeline.FileTypeVideo}
+
+	title, err := stage.renderTemplate(ctx, `{{ .HostName }}（{{ .RoomName }}）{{ .FileTime | date "2006-01-02 15:04" }}`, file, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "主播A（直播标题）2026-08-20 20:00", title)
+
+	pTitle, err := stage.renderTemplate(ctx, `{{ .FileTime | date "2006-01-02 15:04" }}`, file, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, "2026-08-20 20:00", pTitle)
 }

@@ -60,6 +60,10 @@ const (
 	OptionDTime = "dtime"
 	// OptionCoverExtracted 是否使用 extract_cover 阶段生成的封面
 	OptionCoverExtracted = "cover_use_extracted"
+	// OptionSeasonTmpl 合集标题模板（留空表示不加入合集）
+	OptionSeasonTmpl = "season_tmpl"
+	// OptionNoDynamic 是否不产生投稿动态
+	OptionNoDynamic = "no_dynamic"
 )
 
 // OnRecordFinishedPipeline 扩展版的录制完成后配置
@@ -143,6 +147,8 @@ func ConvertLegacyConfig(legacy *configs.OnRecordFinished) *PipelineConfig {
 			OptionDTime:          legacy.BiliPublish.DTime,
 			OptionCoverExtracted: legacy.BiliPublish.CoverUseExtracted,
 			OptionDeleteAfter:    legacy.BiliPublish.DeleteAfter,
+			OptionSeasonTmpl:     legacy.BiliPublish.SeasonTmpl,
+			OptionNoDynamic:      legacy.BiliPublish.NoDynamic,
 		}
 		stages = append(stages, StageConfig{
 			Name:              StageNameBiliPublish,

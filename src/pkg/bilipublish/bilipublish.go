@@ -21,11 +21,14 @@ import (
 
 // B站投稿相关接口地址
 const (
-	apiPreupload    = "https://member.bilibili.com/x/vupre/web/upload/preupload" // 预上传（获取分片上传参数）
-	apiFinishUpload = "https://member.bilibili.com/x/vupre/web/upload/upload"    // 结束上传（获取 cid）
-	apiCoverUpload  = "https://member.bilibili.com/x/vu/web/cover/up"            // 封面上传
-	apiSubmit       = "https://member.bilibili.com/x/vu/web/add/v3"              // 提交稿件
-	apiNav          = "https://api.bilibili.com/x/web-interface/nav"             // 登录状态校验
+	apiPreupload    = "https://member.bilibili.com/x/vupre/web/upload/preupload"                // 预上传（获取分片上传参数）
+	apiFinishUpload = "https://member.bilibili.com/x/vupre/web/upload/upload"                   // 结束上传（获取 cid）
+	apiCoverUpload  = "https://member.bilibili.com/x/vu/web/cover/up"                           // 封面上传
+	apiSubmit       = "https://member.bilibili.com/x/vu/web/add/v3"                             // 提交稿件
+	apiNav          = "https://api.bilibili.com/x/web-interface/nav"                            // 登录状态校验
+	apiSeasons      = "https://member.bilibili.com/x2/creative/web/seasons"                     // 合集列表
+	apiSeasonAdd    = "https://member.bilibili.com/x2/creative/web/season/add"                  // 创建合集
+	apiSeasonAddEp  = "https://member.bilibili.com/x2/creative/web/season/section/episodes/add" // 添加视频到合集
 
 	headerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 bililive-go"
 	headerReferer   = "https://member.bilibili.com/"
@@ -44,6 +47,8 @@ const (
 	maxTagCount = 12
 	// 标题最大字数
 	maxTitleRunes = 80
+	// 动态禁止属性位（attribute 位 1，值为 2：禁止 APP 推送投稿动态）
+	attributeNoDynamic = 2
 )
 
 // ResolveCookie 按优先级解析投稿使用的 B站 Cookie：
@@ -114,6 +119,140 @@ func (c *Client) Verify(ctx context.Context) (NavResult, error) {
 	return result.Data, nil
 }
 
+// Season B站合集（新版 season）信息
+type Season struct {
+	ID        int64  // 合集 ID
+	Title     string // 合集标题
+	SectionID int64  // 合集默认小节 ID（合集下第一个小节）
+}
+
+// SeasonEpisode 合集中的单个视频条目（每个分P一个条目）
+type SeasonEpisode struct {
+	AID   int64
+	CID   int64
+	Title string
+}
+
+// ListSeasons 获取当前账号的合集列表
+func (c *Client) ListSeasons(ctx context.Context) ([]Season, error) {
+	query := url.Values{}
+	query.Set("pn", "1")
+	query.Set("ps", "50")
+	query.Set("order", "mtime")
+	query.Set("sort", "desc")
+	query.Set("draft", "1")
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Seasons []struct {
+				Season struct {
+					ID    int64  `json:"id"`
+					Title string `json:"title"`
+				} `json:"season"`
+				Sections struct {
+					Sections []struct {
+						ID int64 `json:"id"`
+					} `json:"sections"`
+				} `json:"sections"`
+			} `json:"seasons"`
+		} `json:"data"`
+	}
+	if err := c.doRequest(ctx, http.MethodGet, apiSeasons, query, "", nil, &result); err != nil {
+		return nil, fmt.Errorf("获取合集列表失败: %w", err)
+	}
+	if result.Code != 0 {
+		return nil, fmt.Errorf("获取合集列表失败: code=%d message=%s", result.Code, result.Message)
+	}
+	seasons := make([]Season, 0, len(result.Data.Seasons))
+	for _, s := range result.Data.Seasons {
+		sectionID := int64(0)
+		if len(s.Sections.Sections) > 0 {
+			sectionID = s.Sections.Sections[0].ID
+		}
+		seasons = append(seasons, Season{ID: s.Season.ID, Title: s.Season.Title, SectionID: sectionID})
+	}
+	return seasons, nil
+}
+
+// CreateSeason 创建合集并返回合集信息（含默认小节 ID）
+func (c *Client) CreateSeason(ctx context.Context, title, desc, cover string) (Season, error) {
+	form := url.Values{}
+	form.Set("title", title)
+	form.Set("desc", desc)
+	form.Set("cover", cover)
+	form.Set("season_price", "0")
+	form.Set("csrf", c.csrf)
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    int64  `json:"data"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, apiSeasonAdd, nil, "application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()), &result); err != nil {
+		return Season{}, fmt.Errorf("创建合集失败: %w", err)
+	}
+	if result.Code != 0 {
+		return Season{}, fmt.Errorf("创建合集失败: code=%d message=%s", result.Code, result.Message)
+	}
+	if result.Data <= 0 {
+		return Season{}, errors.New("创建合集响应缺少合集 ID")
+	}
+	// 创建成功后通过列表接口补齐默认小节 ID
+	seasons, err := c.ListSeasons(ctx)
+	if err != nil {
+		return Season{ID: result.Data, Title: title}, nil
+	}
+	for _, s := range seasons {
+		if s.ID == result.Data {
+			return s, nil
+		}
+	}
+	return Season{ID: result.Data, Title: title}, nil
+}
+
+// AddToSeason 把稿件（可多分P）加入合集小节，每个分P作为合集中的一个条目
+func (c *Client) AddToSeason(ctx context.Context, sectionID int64, episodes []SeasonEpisode) error {
+	if len(episodes) == 0 {
+		return errors.New("加入合集失败: 没有视频条目")
+	}
+	episodeMaps := make([]map[string]interface{}, 0, len(episodes))
+	for _, e := range episodes {
+		episodeMaps = append(episodeMaps, map[string]interface{}{
+			"aid":          e.AID,
+			"cid":          e.CID,
+			"title":        e.Title,
+			"charging_pay": 0,
+		})
+	}
+	body := map[string]interface{}{
+		"sectionId": sectionID,
+		"episodes":  episodeMaps,
+		"csrf":      c.csrf,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("构建合集请求体失败: %w", err)
+	}
+	query := url.Values{}
+	query.Set("csrf", c.csrf)
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := c.doRequest(ctx, http.MethodPost, apiSeasonAddEp, query, "application/json",
+		bytes.NewReader(payload), &result); err != nil {
+		return fmt.Errorf("加入合集失败: %w", err)
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("加入合集失败: code=%d message=%s", result.Code, result.Message)
+	}
+	return nil
+}
+
 // PublishFile 单个分P的视频文件
 type PublishFile struct {
 	FilePath string // 视频文件路径
@@ -128,17 +267,23 @@ type PublishRequest struct {
 	FilePath  string        // 兼容单文件调用：Files 为空时使用此字段
 	FileName  string        // 兼容单文件调用
 	CoverPath string        // 封面文件路径（可选，为空则不传封面）
+	CoverURL  string        // 封面 URL（已上传好的封面，优先于 CoverPath 使用）
 	Title     string        // 稿件标题（不超过 80 字）
 	Desc      string        // 稿件简介
 	Tid       int           // B站分区 tid（如 21 = 直播）
 	Tags      []string      // 标签（最多 12 个）
 	DTime     time.Time     // 定时发布时间，零值表示立即发布
+	// SeasonSectionID 合集小节 ID（大于 0 时投稿成功后自动把稿件加入该合集）
+	SeasonSectionID int64
+	// NoDynamic 是否不产生投稿动态（attribute 位 1 + 空 dynamic），默认 false
+	NoDynamic bool
 }
 
 // PublishResult 投稿结果
 type PublishResult struct {
-	AID  int64  `json:"aid"`
-	BVID string `json:"bvid"`
+	AID     int64  `json:"aid"`
+	BVID    string `json:"bvid"`
+	Warning string `json:"warning,omitempty"` // 非致命问题（如加入合集失败），不影响稿件本身
 }
 
 // Publish 投稿视频到 B站，内部依次执行：
@@ -210,18 +355,60 @@ func (c *Client) Publish(ctx context.Context, req PublishRequest) (PublishResult
 		})
 	}
 
-	// 可选封面上传：封面文件不存在时静默跳过
-	coverURL := ""
-	if req.CoverPath != "" {
+	// 可选封面上传：已提供 CoverURL 时直接使用；否则 CoverPath 存在时上传，
+	// 封面文件不存在时静默跳过
+	coverURL := req.CoverURL
+	if coverURL == "" && req.CoverPath != "" {
 		if _, err := os.Stat(req.CoverPath); err == nil {
-			coverURL, err = c.uploadCover(ctx, req.CoverPath)
+			coverURL, err = c.UploadCover(ctx, req.CoverPath)
 			if err != nil {
 				return PublishResult{}, err
 			}
 		}
 	}
 
-	return c.submit(ctx, req.Title, req.Desc, req.Tid, req.Tags, req.DTime, videos, coverURL)
+	result, err := c.submit(ctx, req.Title, req.Desc, req.Tid, req.Tags, req.DTime, req.NoDynamic, videos, coverURL)
+	if err != nil {
+		return PublishResult{}, err
+	}
+
+	// 投稿成功后把稿件加入合集（每个分P作为合集中的一个条目）
+	if req.SeasonSectionID > 0 {
+		episodes := make([]SeasonEpisode, 0, len(videos))
+		for _, v := range videos {
+			episodes = append(episodes, SeasonEpisode{
+				AID:   result.AID,
+				CID:   cidFromVideoMap(v),
+				Title: titleFromVideoMap(v),
+			})
+		}
+		if err := c.AddToSeason(ctx, req.SeasonSectionID, episodes); err != nil {
+			// 加入合集失败不影响稿件本身，以警告形式返回
+			result.Warning = fmt.Sprintf("投稿成功但加入合集失败: %v", err)
+		}
+	}
+
+	return result, nil
+}
+
+// cidFromVideoMap 从分P map 中取出 cid
+func cidFromVideoMap(v map[string]interface{}) int64 {
+	switch c := v["cid"].(type) {
+	case string:
+		n, _ := strconv.ParseInt(c, 10, 64)
+		return n
+	case int64:
+		return c
+	case float64:
+		return int64(c)
+	}
+	return 0
+}
+
+// titleFromVideoMap 从分P map 中取出标题
+func titleFromVideoMap(v map[string]interface{}) string {
+	s, _ := v["title"].(string)
+	return s
 }
 
 // normalizePublishFiles 规整待投稿文件列表：
@@ -413,8 +600,8 @@ func (c *Client) finishUpload(ctx context.Context, s *uploadSession) (string, er
 	return result.Data.CID, nil
 }
 
-// uploadCover 上传封面，返回可用的封面 URL
-func (c *Client) uploadCover(ctx context.Context, coverPath string) (string, error) {
+// UploadCover 上传封面，返回可用的封面 URL
+func (c *Client) UploadCover(ctx context.Context, coverPath string) (string, error) {
 	data, err := os.ReadFile(coverPath)
 	if err != nil {
 		return "", fmt.Errorf("读取封面文件失败: %w", err)
@@ -446,7 +633,7 @@ func (c *Client) uploadCover(ctx context.Context, coverPath string) (string, err
 }
 
 // submit 提交稿件（add/v3）
-func (c *Client) submit(ctx context.Context, title, desc string, tid int, tags []string, dtime time.Time, videos []map[string]interface{}, coverURL string) (PublishResult, error) {
+func (c *Client) submit(ctx context.Context, title, desc string, tid int, tags []string, dtime time.Time, noDynamic bool, videos []map[string]interface{}, coverURL string) (PublishResult, error) {
 	body := map[string]interface{}{
 		"videos":             videos,
 		"cover":              coverURL,
@@ -470,6 +657,10 @@ func (c *Client) submit(ctx context.Context, title, desc string, tid int, tags [
 		"up_close_danmu":     false,
 		"web_os":             3,
 		"csrf":               c.csrf,
+	}
+	if noDynamic {
+		// 不产生投稿动态：空 dynamic 且设置 attribute 位 1（禁止 APP 推送动态）
+		body["attribute"] = attributeNoDynamic
 	}
 	if !dtime.IsZero() {
 		body["dtime"] = dtime.Format("2006-01-02 15:04:05")

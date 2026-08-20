@@ -78,14 +78,16 @@ func DecorateConfigNode(node *yaml.Node) {
 # 启用后录制完成的视频会自动投稿到 B站
 # 注意：还需在直播间列表中单独开启指定房间的"投稿B站"开关才会实际投稿`
 			setFieldComment(biliPublishNode, "enable", "# 是否启用B站投稿（总开关，仍需房间级开关配合）", "")
-			setFieldComment(biliPublishNode, "title_tmpl", "# 投稿标题模板，支持 {{ .HostName }}、{{ .RoomName }}、{{ now }} 等变量", "")
-			setFieldComment(biliPublishNode, "p_title_tmpl", "# 分P标题模板（多文件投稿时每个分P的标题），支持 {{ .Index }}、{{ .FileName }}，留空使用主标题", "")
+			setFieldComment(biliPublishNode, "title_tmpl", "# 投稿标题模板，支持 {{ .HostName }}、{{ .RoomName }}、{{ .FileTime }}（录制文件时间）、{{ now }} 等变量", "")
+			setFieldComment(biliPublishNode, "p_title_tmpl", "# 分P标题模板（多文件投稿时每个分P的标题），支持 {{ .FileTime }}、{{ .Index }}、{{ .FileName }}，留空使用主标题", "")
 			setFieldComment(biliPublishNode, "desc_tmpl", "# 投稿简介模板，支持同上变量", "")
 			setFieldComment(biliPublishNode, "tid", "# B站分区 tid（21 = 直播，其他分区请自行查询）", "")
 			setFieldComment(biliPublishNode, "tags", "# 投稿标签，最多 12 个", "")
 			setFieldComment(biliPublishNode, "cover_use_extracted", "# 优先使用 extract_cover 阶段生成的封面（需同时开启 save_cover）", "")
 			setFieldComment(biliPublishNode, "dtime", "# 定时发布（RFC3339 格式，如 2026-08-20T20:00:00+08:00），留空立即发布", "")
 			setFieldComment(biliPublishNode, "delete_after", "# 投稿成功后是否删除本地文件，默认 false", "")
+			setFieldComment(biliPublishNode, "season_tmpl", "# 合集标题模板：同一主播的录像会自动加入同名合集（不存在则自动创建），留空表示不加入合集", "")
+			setFieldComment(biliPublishNode, "no_dynamic", "# 投稿后不产生投稿动态，默认 true", "")
 			setFieldComment(biliPublishNode, "cookie", "# 显式指定投稿 Cookie（留空则复用全局 Cookies 中的 B站登录态）", "")
 		}
 	}

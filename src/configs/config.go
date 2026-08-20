@@ -282,13 +282,13 @@ const (
 
 // CloudUpload 云上传配置
 type CloudUpload struct {
-	Enable             bool     `yaml:"enable" json:"enable"`                                               // 是否启用云上传
-	ApiUrl             string   `yaml:"api_url" json:"api_url"`                                             // 外部 OpenList API 地址
-	Username           string   `yaml:"username" json:"username"`                                           // 外部 OpenList 用户名
-	Password           string   `yaml:"password" json:"password"`                                           // 外部 OpenList 密码
-	StorageName        string   `yaml:"storage_name" json:"storage_name"`                                   // 使用的 OpenList 存储名称
-	UploadPathTmpl     string   `yaml:"upload_path_tmpl" json:"upload_path_tmpl"`                           // 上传路径模板
-	DeleteAfterUpload  bool     `yaml:"delete_after_upload" json:"delete_after_upload"`                     // 上传成功后删除本地文件
+	Enable               bool     `yaml:"enable" json:"enable"`                                               // 是否启用云上传
+	ApiUrl               string   `yaml:"api_url" json:"api_url"`                                             // 外部 OpenList API 地址
+	Username             string   `yaml:"username" json:"username"`                                           // 外部 OpenList 用户名
+	Password             string   `yaml:"password" json:"password"`                                           // 外部 OpenList 密码
+	StorageName          string   `yaml:"storage_name" json:"storage_name"`                                   // 使用的 OpenList 存储名称
+	UploadPathTmpl       string   `yaml:"upload_path_tmpl" json:"upload_path_tmpl"`                           // 上传路径模板
+	DeleteAfterUpload    bool     `yaml:"delete_after_upload" json:"delete_after_upload"`                     // 上传成功后删除本地文件
 	UploadSpeedLimit     int      `yaml:"upload_speed_limit" json:"upload_speed_limit"`                       // 上传速度限制 (KB/s)，0 表示不限速
 	MaxConcurrentUploads int      `yaml:"max_concurrent_uploads" json:"max_concurrent_uploads"`               // 最大并发上传数，0 表示不限制（顺序上传）
 	AdditionalStorages   []string `yaml:"additional_storages,omitempty" json:"additional_storages,omitempty"` // 额外存储（支持多目标上传）
@@ -296,16 +296,18 @@ type CloudUpload struct {
 
 // BiliPublish B站投稿配置
 type BiliPublish struct {
-	Enable            bool     `yaml:"enable" json:"enable"`                             // 是否启用 B站投稿
-	TitleTmpl         string   `yaml:"title_tmpl" json:"title_tmpl"`                     // 投稿标题模板
+	Enable            bool     `yaml:"enable" json:"enable"`                                 // 是否启用 B站投稿
+	TitleTmpl         string   `yaml:"title_tmpl" json:"title_tmpl"`                         // 投稿标题模板
 	PTitleTmpl        string   `yaml:"p_title_tmpl,omitempty" json:"p_title_tmpl,omitempty"` // 分P标题模板（多文件投稿时每个分P的标题，留空使用主标题）
-	DescTmpl          string   `yaml:"desc_tmpl" json:"desc_tmpl"`                       // 投稿简介模板
-	Tid               int      `yaml:"tid" json:"tid"`                                   // B站分区 tid（21 = 直播）
-	Tags              []string `yaml:"tags,omitempty" json:"tags,omitempty"`             // 标签（最多 12 个）
-	CoverUseExtracted bool     `yaml:"cover_use_extracted" json:"cover_use_extracted"`   // 优先使用 extract_cover 阶段生成的封面
-	DTime             string   `yaml:"dtime,omitempty" json:"dtime,omitempty"`           // 定时发布（RFC3339，留空立即发布）
-	DeleteAfter       bool     `yaml:"delete_after" json:"delete_after"`                 // 投稿成功后删除本地文件
-	Cookie            string   `yaml:"cookie,omitempty" json:"cookie,omitempty"`         // 显式 Cookie（留空则复用全局 Cookies）
+	DescTmpl          string   `yaml:"desc_tmpl" json:"desc_tmpl"`                           // 投稿简介模板
+	Tid               int      `yaml:"tid" json:"tid"`                                       // B站分区 tid（21 = 直播）
+	Tags              []string `yaml:"tags,omitempty" json:"tags,omitempty"`                 // 标签（最多 12 个）
+	CoverUseExtracted bool     `yaml:"cover_use_extracted" json:"cover_use_extracted"`       // 优先使用 extract_cover 阶段生成的封面
+	DTime             string   `yaml:"dtime,omitempty" json:"dtime,omitempty"`               // 定时发布（RFC3339，留空立即发布）
+	DeleteAfter       bool     `yaml:"delete_after" json:"delete_after"`                     // 投稿成功后删除本地文件
+	SeasonTmpl        string   `yaml:"season_tmpl,omitempty" json:"season_tmpl,omitempty"`   // 合集标题模板（留空表示不加入合集）
+	NoDynamic         bool     `yaml:"no_dynamic,omitempty" json:"no_dynamic,omitempty"`     // 投稿后不产生投稿动态（默认 true）
+	Cookie            string   `yaml:"cookie,omitempty" json:"cookie,omitempty"`             // 显式 Cookie（留空则复用全局 Cookies）
 }
 
 // On record finished actions.
@@ -973,11 +975,14 @@ var defaultConfig = Config{
 		},
 		BiliPublish: BiliPublish{
 			Enable:            false,
-			TitleTmpl:         "{{ .HostName }} {{ now | date \"2006-01-02\" }} 直播录像",
+			TitleTmpl:         "{{ .HostName }}（{{ .RoomName }}）{{ .FileTime | date \"2006-01-02 15:04\" }}",
+			PTitleTmpl:        "{{ .FileTime | date \"2006-01-02 15:04\" }}",
 			DescTmpl:          "本视频由 bililive-go 自动录制并投稿。",
 			Tid:               21,
 			CoverUseExtracted: true,
 			DeleteAfter:       false,
+			SeasonTmpl:        "{{ .HostName }} 直播录播",
+			NoDynamic:         true,
 		},
 		UploadTiming:        UploadTimingAfterProcess,
 		BurnSubtitles:       false,
