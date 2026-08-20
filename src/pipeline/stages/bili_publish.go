@@ -62,7 +62,7 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 	// 房间级开关：默认不投稿，只有用户单独开启的房间才会投稿
 	if !s.shouldPublishForRoom(ctx) {
 		s.mu.Lock()
-		s.logs += "B站投稿: 该房间未开启投稿（平台不是 bilibili 或房间级开关未开启），跳过\n"
+		s.logs += "B站投稿: 该房间未开启投稿（房间级开关未开启），跳过\n"
 		s.mu.Unlock()
 		ctx.Logger.Infof("B站投稿: 房间未开启投稿（URL=%s），跳过", ctx.RecordInfo.LiveURL)
 		return input, nil
@@ -216,12 +216,9 @@ func (s *BiliPublishStage) Execute(ctx *pipeline.PipelineContext, input []pipeli
 }
 
 // shouldPublishForRoom 判断当前录制是否应该投稿：
-// 平台必须为 bilibili，且能匹配到房间，且房间级 BiliPublish 开关为 true（默认不投稿）
+// 能匹配到房间，且房间级 BiliPublish 开关为 true（默认不投稿）。
+// 投稿目标为 B站，与录制来源平台无关，任意平台房间均可开启投稿。
 func (s *BiliPublishStage) shouldPublishForRoom(ctx *pipeline.PipelineContext) bool {
-	platform := strings.TrimSpace(ctx.RecordInfo.Platform)
-	if platform != "哔哩哔哩" && !strings.EqualFold(platform, "bilibili") {
-		return false
-	}
 	if ctx.RecordInfo.LiveURL == "" {
 		return false
 	}

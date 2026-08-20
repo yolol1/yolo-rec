@@ -31,15 +31,40 @@ func newPipelineContext(platform, liveURL string) *pipeline.PipelineContext {
 	}
 }
 
-func TestBiliPublishStageSkipNonBilibili(t *testing.T) {
+func TestBiliPublishStageNonBilibiliPlatform(t *testing.T) {
+	// 投稿目标是 B站，与录制平台无关：非 B站平台房间开启投稿后同样进入投稿流程
+	cfg := configs.NewConfig()
+	cfg.OnRecordFinished.BiliPublish.Enable = true
+	cfg.OnRecordFinished.BiliPublish.TitleTmpl = "标题"
+	cfg.OnRecordFinished.BiliPublish.Tid = 21
+	cfg.LiveRooms = []configs.LiveRoom{
+		{Url: "https://www.douyu.com/123", BiliPublish: configs.BoolPtr(true)},
+	}
+	configs.SetCurrentConfig(cfg)
+
+	// 需要一个真实存在的视频文件才能走到投稿客户端
+	videoPath := filepath.Join(t.TempDir(), "a.flv")
+	assert.NoError(t, os.WriteFile(videoPath, []byte("fake"), 0o644))
+
+	stage := newBiliPublishStage()
+	ctx := newPipelineContext("斗鱼", "https://www.douyu.com/123")
+	input := []pipeline.FileInfo{{Path: videoPath, Type: pipeline.FileTypeVideo}}
+	_, err := stage.Execute(ctx, input)
+	// 房间开关已开启 → 进入投稿流程；未配置 Cookie → 投稿失败（而不是跳过）
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "B站投稿失败")
+}
+
+func TestBiliPublishStageNonBilibiliPlatformSkipWhenNotEnabled(t *testing.T) {
+	// 非 B站平台房间同样遵守安全默认：房间级开关未开启则不投稿
 	cfg := configs.NewConfig()
 	cfg.OnRecordFinished.BiliPublish.Enable = true
 	cfg.LiveRooms = []configs.LiveRoom{
-		{Url: "https://live.bilibili.com/123", BiliPublish: configs.BoolPtr(true)},
+		{Url: "https://www.douyu.com/123"}, // BiliPublish=nil 默认不投稿
 	}
 	configs.SetCurrentConfig(cfg)
 	stage := newBiliPublishStage()
-	ctx := newPipelineContext("斗鱼", "https://live.bilibili.com/123")
+	ctx := newPipelineContext("斗鱼", "https://www.douyu.com/123")
 	input := []pipeline.FileInfo{{Path: "a.flv", Type: pipeline.FileTypeVideo}}
 	output, err := stage.Execute(ctx, input)
 	assert.NoError(t, err)

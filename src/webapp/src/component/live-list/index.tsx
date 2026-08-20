@@ -469,33 +469,31 @@ class LiveList extends React.Component<Props, IState> {
                                 />
                             </Tooltip>
 
-                            {data.address === '哔哩哔哩' && (
-                                <Tooltip title={data.biliPublish ? "关闭 B站投稿" : "开启 B站投稿（录制完成后自动发布）"}>
-                                    <Switch
-                                        checkedChildren="B站投稿"
-                                        unCheckedChildren="B站投稿"
-                                        checked={data.biliPublish}
-                                        onChange={(checked, e) => {
-                                            e.stopPropagation();
-                                            if (!checked) {
-                                                api.disableBiliPublish(data.roomId)
-                                                    .then(rsp => {
-                                                        api.saveSettingsInBackground();
-                                                        this.refresh();
-                                                    })
-                                                    .catch(err => alert(`关闭 B站投稿失败:\n${err}`));
-                                            } else {
-                                                api.enableBiliPublish(data.roomId)
-                                                    .then(rsp => {
-                                                        api.saveSettingsInBackground();
-                                                        this.refresh();
-                                                    })
-                                                    .catch(err => alert(`开启 B站投稿失败:\n${err}`));
-                                            }
-                                        }}
-                                    />
-                                </Tooltip>
-                            )}
+                            <Tooltip title={data.biliPublish ? "关闭 B站投稿" : "开启 B站投稿（录制完成后自动发布）"}>
+                                <Switch
+                                    checkedChildren="B站投稿"
+                                    unCheckedChildren="B站投稿"
+                                    checked={data.biliPublish}
+                                    onChange={(checked, e) => {
+                                        e.stopPropagation();
+                                        if (!checked) {
+                                            api.disableBiliPublish(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`关闭 B站投稿失败:\n${err}`));
+                                        } else {
+                                            api.enableBiliPublish(data.roomId)
+                                                .then(rsp => {
+                                                    api.saveSettingsInBackground();
+                                                    this.refresh();
+                                                })
+                                                .catch(err => alert(`开启 B站投稿失败:\n${err}`));
+                                        }
+                                    }}
+                                />
+                            </Tooltip>
 
                             <Tooltip title="云上传三态开关：跟随全局 / 强制开启 / 强制关闭">
                                 <Select
