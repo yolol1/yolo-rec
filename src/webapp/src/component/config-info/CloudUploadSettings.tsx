@@ -91,6 +91,7 @@ const CloudUploadSettings: React.FC<CloudUploadSettingsProps> = ({ config }) => 
       title={<><CloudUploadOutlined /> 云盘上传</>}
       size="small"
       style={{ marginBottom: 16 }}
+      id="global-cloud-upload"
       extra={
         <Tag color={isEnabled ? 'green' : 'default'}>
           {isEnabled ? '已启用' : '未启用'}

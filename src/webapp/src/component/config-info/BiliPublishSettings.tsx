@@ -92,6 +92,7 @@ const BiliPublishSettings: React.FC<BiliPublishSettingsProps> = ({ config }) => 
       title={<><SendOutlined /> B站投稿</>}
       size="small"
       style={{ marginBottom: 16 }}
+      id="global-bili-publish"
       extra={
         <Tag color={isEnabled ? 'green' : 'default'}>
           {isEnabled ? '已启用' : '未启用'}

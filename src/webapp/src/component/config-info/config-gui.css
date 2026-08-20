@@ -334,6 +334,49 @@
   margin-top: 16px;
 }
 
+/* 全局设置：左侧快捷跳转导航 */
+.config-global-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.config-global-nav {
+  flex-shrink: 0;
+  width: 168px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding-right: 12px;
+  border-right: 1px solid #f0f0f0;
+}
+
+.config-global-nav-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 8px;
+}
+
+.config-global-nav .ant-anchor-wrapper {
+  background: transparent;
+}
+
+.config-global-form {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 窄屏时隐藏全局设置的左侧快捷导航，避免挤压表单空间 */
+@media screen and (max-width: 1200px) {
+  .config-global-layout {
+    display: block;
+  }
+
+  .config-global-nav {
+    display: none;
+  }
+}
+
 /* 锚点聚焦高亮效果 */
 @keyframes highlight-fade {
   0% {

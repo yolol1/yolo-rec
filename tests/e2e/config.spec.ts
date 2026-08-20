@@ -162,3 +162,37 @@ test.describe('设置页面 - 标签页切换', () => {
   });
 });
 
+test.describe('设置页面 - 左侧快捷跳转', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/#/configInfo');
+    await page.waitForLoadState('domcontentloaded');
+  });
+
+  test('全局设置显示快捷跳转导航', async ({ page }) => {
+    await page.waitForTimeout(1000);
+
+    // 快捷跳转标题可见
+    const navTitle = page.locator('.config-global-nav-title');
+    await expect(navTitle).toBeVisible();
+
+    // 导航包含多个设置区块锚点
+    const navItems = page.locator('.config-global-nav .ant-anchor-link');
+    expect(await navItems.count()).toBeGreaterThan(5);
+  });
+
+  test('点击快捷跳转定位到对应设置区块', async ({ page }) => {
+    await page.waitForTimeout(1000);
+
+    // 点击“流偏好配置”锚点
+    await page.locator('.config-global-nav a[href="#global-stream-preference"]').click();
+    await page.waitForTimeout(1200);
+
+    // 对应卡片可见且位于视口顶部附近
+    const card = page.locator('#global-stream-preference');
+    await expect(card).toBeVisible();
+    const top = await card.evaluate(el => Math.round(el.getBoundingClientRect().top));
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top).toBeLessThan(300);
+  });
+});
+

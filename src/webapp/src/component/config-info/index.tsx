@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Tabs, Button, message, Spin, Input, Switch, InputNumber, Form,
-  Tag, Space, Divider, Alert, Modal, Select,
+  Tag, Space, Divider, Alert, Modal, Select, Anchor, Affix,
   List, Badge, Tooltip, Card, Collapse, Popover
 } from 'antd';
 // @ts-ignore
@@ -418,6 +418,32 @@ const ConfigField: React.FC<ConfigFieldProps> = ({
   );
 };
 
+// 全局设置页面的区块快捷导航
+const GLOBAL_SECTIONS: Array<{ key: string; href: string; title: string }> = [
+  { key: 'rpc', href: '#global-rpc', title: 'RPC 服务设置' },
+  { key: 'base', href: '#global-base', title: '基础设置' },
+  { key: 'log', href: '#global-log', title: '日志设置' },
+  { key: 'feature', href: '#global-feature', title: '功能特性' },
+  { key: 'stream-preference', href: '#global-stream-preference', title: '流偏好配置' },
+  { key: 'video-split', href: '#global-video-split', title: '视频分割策略' },
+  { key: 'record-finished', href: '#global-record-finished', title: '录制完成后动作' },
+  { key: 'bili-publish', href: '#global-bili-publish', title: 'B站投稿' },
+  { key: 'cloud-upload', href: '#global-cloud-upload', title: '云盘上传' },
+  { key: 'advanced', href: '#global-advanced', title: '高级设置' },
+  ...(ENABLE_PROXY_CONFIG ? [{ key: 'proxy', href: '#global-proxy', title: '代理设置' }] : []),
+  { key: 'update', href: '#global-update', title: '自动更新设置' }
+];
+
+// 获取设置页所在的滚动容器：
+// 页面内容区自身可滚动时使用它，否则回退到整页滚动（window）
+const getConfigScrollContainer = (): HTMLElement | Window => {
+  const container = document.querySelector<HTMLElement>('.inside-content-padding');
+  if (container && container.scrollHeight > container.clientHeight + 1) {
+    return container;
+  }
+  return window;
+};
+
 // 全局设置组件
 const GlobalSettings: React.FC<{
   config: EffectiveConfig;
@@ -425,6 +451,12 @@ const GlobalSettings: React.FC<{
   loading: boolean;
 }> = ({ config, onUpdate, loading }) => {
   const [form] = Form.useForm();
+
+  // 阻止 Anchor 点击后通过 pushState 改写 URL，避免干扰 HashRouter 路由；
+  // 滚动跳转由 Anchor 内部基于滚动容器（.inside-content-padding）完成。
+  const handleAnchorClick = (e: React.MouseEvent<HTMLElement>) => {
+    e.preventDefault();
+  };
 
   useEffect(() => {
     if (config) {
@@ -488,8 +520,20 @@ const GlobalSettings: React.FC<{
   }
 
   return (
-    <div className="config-content">
-      <Form form={form} layout="vertical">
+    <div className="config-content config-global-layout">
+      <Affix offsetTop={16} target={getConfigScrollContainer}>
+        <div className="config-global-nav">
+          <div className="config-global-nav-title">快捷跳转</div>
+          <Anchor
+            items={GLOBAL_SECTIONS}
+            offsetTop={16}
+            onClick={handleAnchorClick}
+            getContainer={getConfigScrollContainer}
+            affix={false}
+          />
+        </div>
+      </Affix>
+      <Form form={form} layout="vertical" className="config-global-form">
         {/* RPC 设置 */}
         <Card title="RPC 服务设置" size="small" style={{ marginBottom: 16 }} id="global-rpc">
           <ConfigField label="启用 RPC" description="启用后可通过 Web 界面管理录播机">
@@ -571,7 +615,7 @@ const GlobalSettings: React.FC<{
         </Card>
 
         {/* 日志设置 */}
-        <Card title="日志设置" size="small" style={{ marginBottom: 16 }}>
+        <Card title="日志设置" size="small" style={{ marginBottom: 16 }} id="global-log">
           <ConfigField
             label="日志输出目录"
             effectiveValue={config.actual_log_folder}
@@ -598,7 +642,7 @@ const GlobalSettings: React.FC<{
         </Card>
 
         {/* 功能特性 */}
-        <Card title="功能特性" size="small" style={{ marginBottom: 16 }}>
+        <Card title="功能特性" size="small" style={{ marginBottom: 16 }} id="global-feature">
           <ConfigField
             label="下载器类型"
             description="选择用于下载直播流的工具。录播姬需要单独安装。"
@@ -640,7 +684,7 @@ const GlobalSettings: React.FC<{
         </Card>
 
         {/* 流偏好配置 */}
-        <Card title="流偏好配置" size="small" style={{ marginBottom: 16 }}>
+        <Card title="流偏好配置" size="small" style={{ marginBottom: 16 }} id="global-stream-preference">
           <ConfigField
             label="清晰度偏好"
             description="偏好的清晰度名称，留空则自动选择最高画质"
@@ -711,7 +755,7 @@ const GlobalSettings: React.FC<{
         </Card>
 
         {/* 视频分割策略 */}
-        <Card title="视频分割策略" size="small" style={{ marginBottom: 16 }}>
+        <Card title="视频分割策略" size="small" style={{ marginBottom: 16 }} id="global-video-split">
           <ConfigField label="房间名变化时分割" description="当主播更换直播间标题时自动分割视频">
             <Form.Item name={['video_split_strategies', 'on_room_name_changed']} valuePropName="checked" noStyle>
               <Switch />
@@ -742,7 +786,7 @@ const GlobalSettings: React.FC<{
         </Card>
 
         {/* 录制完成后动作 */}
-        <Card title="录制完成后动作" size="small" style={{ marginBottom: 16 }}>
+        <Card title="录制完成后动作" size="small" style={{ marginBottom: 16 }} id="global-record-finished">
           <ConfigField label="修复 FLV 文件" description="录制完成后自动修复 FLV 文件">
             <Form.Item name={['on_record_finished', 'fix_flv_at_first']} valuePropName="checked" noStyle>
               <Switch />
@@ -777,7 +821,7 @@ const GlobalSettings: React.FC<{
         <CloudUploadSettings config={config} />
 
         {/* 高级设置 */}
-        <Card title="高级设置" size="small" style={{ marginBottom: 16 }}>
+        <Card title="高级设置" size="small" style={{ marginBottom: 16 }} id="global-advanced">
           <ConfigField
             label="应用数据目录"
             description="应用数据的存储目录"
@@ -809,7 +853,7 @@ const GlobalSettings: React.FC<{
 
         {/* 代理设置（功能开关控制，开发中） */}
         {ENABLE_PROXY_CONFIG && (
-          <Card title="代理设置" size="small" style={{ marginBottom: 16 }}>
+          <Card title="代理设置" size="small" style={{ marginBottom: 16 }} id="global-proxy">
             <ConfigField
               label="通用代理"
               description="关闭时使用系统环境变量 (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)"
