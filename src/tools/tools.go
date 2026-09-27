@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync/atomic"
 
@@ -176,6 +177,36 @@ func SyncBuiltInTools(targetToolFolder string) (err error) {
 	return err
 }
 
+// isInDockerEnv 判断当前进程是否运行在本项目的 Docker 镜像内
+// （Dockerfile 中设置了 ENV IS_DOCKER=true）。
+func isInDockerEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("IS_DOCKER")), "true")
+}
+
+// resolveTmpExecRootFolder 计算“存储目录不可执行”时用于运行外部工具的临时执行目录。
+//
+// 背景：remotetools 只在 Linux 上检测目录是否可执行（Windows/macOS 上直接视为可执行），
+// 也就是说该目录仅在 Linux 上会被真正使用。此前这里无条件硬编码了容器内路径
+// /opt/bililive/tmp_for_exec：在 Windows 上它会被解析成“当前盘符根目录下的
+// \opt\bililive\tmp_for_exec”（例如 D:\opt\bililive\tmp_for_exec），
+// 于是每次启动都会在用户磁盘上创建这个与功能无关的目录。
+//
+// 现在的规则：
+//   - 非 Linux：返回空串（该机制不适用，不创建任何目录）
+//   - Docker 容器内：沿用镜像预置的 /opt/bililive/tmp_for_exec
+//   - 其他 Linux：退回系统临时目录，避免依赖可能不存在或不可写的 /opt
+//
+// 返回空串表示不设置该目录，remotetools 将直接使用工具存储目录。
+func resolveTmpExecRootFolder() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	if isInDockerEnv() {
+		return "/opt/bililive/tmp_for_exec"
+	}
+	return filepath.Join(os.TempDir(), "bililive-go", "tmp_for_exec")
+}
+
 func Init() (err error) {
 	// 已初始化直接返回
 	if toolStatusValue(currentToolStatus.Load()) == toolStatusValueInitialized {
@@ -229,13 +260,16 @@ func Init() (err error) {
 		logDirectoryPermissionDiagnostics(preferredWritable)
 	}
 	tools.SetRootFolder(preferredWritable)
-	// 为不可执行场景指定临时执行目录（容器内目录，具备执行权限）
-	execTmp := filepath.Join(string(os.PathSeparator), "opt", "bililive", "tmp_for_exec")
-	if mkErr := os.MkdirAll(execTmp, 0o755); mkErr != nil {
-		blog.GetLogger().WithError(mkErr).Warnf("无法创建临时执行目录 %s，某些外部工具可能无法运行", execTmp)
-		logDirectoryPermissionDiagnostics(execTmp)
+	// 为不可执行场景指定临时执行目录（仅 Linux 需要，其余平台 remotetools 不会使用该目录）
+	if execTmp := resolveTmpExecRootFolder(); execTmp != "" {
+		if mkErr := os.MkdirAll(execTmp, 0o755); mkErr != nil {
+			blog.GetLogger().WithError(mkErr).Warnf("无法创建临时执行目录 %s，某些外部工具可能无法运行", execTmp)
+			logDirectoryPermissionDiagnostics(execTmp)
+			// 创建失败时不设置：避免把工具执行路径指向一个不存在的目录
+		} else {
+			tools.SetTmpRootFolderForExecPermission(execTmp)
+		}
 	}
-	tools.SetTmpRootFolderForExecPermission(execTmp)
 
 	err = api.StartWebUI(0)
 	if err != nil {
@@ -340,7 +374,7 @@ func startBTools() error {
 	nodeFolder := filepath.Dir(node.GetToolPath())
 	btoolsFolder := filepath.Dir(btools.GetToolPath())
 	patchBtoolsJS(btoolsFolder)
-	
+
 	nodePath, err := filepath.Abs(node.GetToolPath())
 	if err != nil {
 		currentBToolsStatus.Store(int32(BToolsStatusFailed))
