@@ -342,15 +342,17 @@ bililive-go/
 ├── src/
 │   ├── cmd/           # 主程序入口
 │   │   ├── bililive/  # 主程序
-│   │   └── launcher/  # 启动器（自动更新）
+│   │   └── build/     # 构建工具实现（build.go 调用）
 │   ├── configs/       # 配置管理
 │   ├── live/          # 各平台直播解析
 │   ├── pkg/           # 通用包
+│   │   ├── launcher/  # 启动器（自动更新）
 │   │   └── update/    # 自动更新模块
 │   ├── recorders/     # 录制器实现
 │   ├── servers/       # HTTP API
 │   └── webapp/        # React 前端
-├── test/              # 测试工具
+├── test/              # 测试工具（更新模拟服务等）
+├── tests/e2e/         # Playwright 端到端测试
 ├── tools/             # 开发工具依赖
 ├── config.yml         # 配置文件（用户创建）
 └── build.go           # 构建脚本入口
