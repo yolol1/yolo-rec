@@ -86,19 +86,33 @@ func sendNtfyRequest(url, token, tag, hostname, message, liveURL, schemeUrl stri
 	return nil
 }
 
-// SendMessage 发送ntfy开始录制消息
-func SendMessage(url, token, tag, hostname, platform, liveURL, schemeUrl string) error {
+// SendMessage 发送ntfy开播消息
+// autoRecord 为 true 表示该直播间会自动录像，消息提示"正在录制中"；
+// 为 false 表示该直播间只监控不录像，消息只提示开播，避免误导。
+func SendMessage(url, token, tag, hostname, platform, liveURL, schemeUrl string, autoRecord bool) error {
 	// 构造消息内容
-	message := fmt.Sprintf("%s正在录制中", platform)
+	var message string
+	if autoRecord {
+		message = fmt.Sprintf("%s正在录制中", platform)
+	} else {
+		message = fmt.Sprintf("%s已开播，未开启自动录制", platform)
+	}
 
 	// 发送请求
 	return sendNtfyRequest(url, token, tag, hostname, message, liveURL, schemeUrl)
 }
 
-// SendStopMessage 发送ntfy停止录制消息
-func SendStopMessage(url, token, tag, hostname, platform, liveURL string) error {
+// SendStopMessage 发送ntfy停播消息
+// autoRecord 为 true 表示本次直播有录像，消息提示"录制已停止"；
+// 为 false 表示该直播间只监控不录像，消息只提示直播结束。
+func SendStopMessage(url, token, tag, hostname, platform, liveURL string, autoRecord bool) error {
 	// 构造消息内容
-	message := fmt.Sprintf("%s录制已停止", platform)
+	var message string
+	if autoRecord {
+		message = fmt.Sprintf("%s录制已停止", platform)
+	} else {
+		message = fmt.Sprintf("%s直播已结束", platform)
+	}
 
 	// 发送请求，注意停止录制通知不使用schemeUrl
 	return sendNtfyRequest(url, token, tag, hostname, message, liveURL, "")

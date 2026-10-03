@@ -33,17 +33,31 @@ type BarkResponse struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// SendMessage 发送 Bark 开始直播通知
-func SendMessage(serverURL, deviceKey, sound, group, icon, level, hostName, platform, liveURL string) error {
+// SendMessage 发送 Bark 开播通知
+// autoRecord 为 true 表示该直播间会自动录像，正文提示"正在录制中"；
+// 为 false 表示该直播间只监控不录像，正文只提示未开启自动录制。
+func SendMessage(serverURL, deviceKey, sound, group, icon, level, hostName, platform, liveURL string, autoRecord bool) error {
 	title := fmt.Sprintf("%s 开始直播", hostName)
-	body := fmt.Sprintf("平台：%s\n正在录制中", platform)
+	var body string
+	if autoRecord {
+		body = fmt.Sprintf("平台：%s\n正在录制中", platform)
+	} else {
+		body = fmt.Sprintf("平台：%s\n未开启自动录制，仅监控", platform)
+	}
 	return sendRequest(serverURL, deviceKey, title, body, sound, group, icon, level, liveURL)
 }
 
-// SendStopMessage 发送 Bark 停止直播通知
-func SendStopMessage(serverURL, deviceKey, sound, group, icon, level, hostName, platform, liveURL string) error {
+// SendStopMessage 发送 Bark 停播通知
+// autoRecord 为 true 表示本次直播有录像，正文提示"录制已停止"；
+// 为 false 表示该直播间只监控不录像，正文只提示直播结束。
+func SendStopMessage(serverURL, deviceKey, sound, group, icon, level, hostName, platform, liveURL string, autoRecord bool) error {
 	title := fmt.Sprintf("%s 直播结束", hostName)
-	body := fmt.Sprintf("平台：%s\n录制已停止", platform)
+	var body string
+	if autoRecord {
+		body = fmt.Sprintf("平台：%s\n录制已停止", platform)
+	} else {
+		body = fmt.Sprintf("平台：%s\n直播已结束", platform)
+	}
 	return sendRequest(serverURL, deviceKey, title, body, sound, group, icon, level, liveURL)
 }
 

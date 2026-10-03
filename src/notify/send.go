@@ -20,6 +20,50 @@ type RecordingFileDetail struct {
 	Size int64  // 文件大小（字节）
 }
 
+// roomNotifyMode 描述某一直播间在通知中需要体现的实际设置状态
+type roomNotifyMode struct {
+	// autoRecord 表示该直播间是否配置了开播后自动录像。
+	// 为 false 时说明该直播间只监控不录像，通知中不应再提示"正在录制中"。
+	autoRecord bool
+	// schemeUrl 房间配置的 scheme URL，仅 ntfy 开播通知会用到
+	schemeUrl string
+}
+
+// resolveRoomNotifyMode 根据直播间 URL 查询配置，得到该房间的实际监控/录制设置。
+// 查不到房间配置时按默认值处理（与 recorders manager 判断是否自动录像的默认值保持一致：默认自动录像），
+// 因此测试通知等未配置 URL 的场景文案不变。
+func resolveRoomNotifyMode(cfg *configs.Config, liveURL string) roomNotifyMode {
+	mode := roomNotifyMode{autoRecord: true}
+	if cfg == nil || liveURL == "" {
+		return mode
+	}
+	if room, err := cfg.GetLiveRoomByUrl(liveURL); err == nil && room != nil {
+		mode.autoRecord = room.IsAutoRecord()
+		mode.schemeUrl = room.SchemeUrl
+	}
+	return mode
+}
+
+// liveStatusText 生成直播状态文案。
+// autoRecord 决定措辞：自动录像的房间提示录制状态，仅监控的房间不提示录制，
+// 避免"只监控不录像"的直播间被误报成正在录制。
+func liveStatusText(status string, autoRecord bool) string {
+	switch status {
+	case consts.LiveStatusStart:
+		if autoRecord {
+			return "已开始直播,正在录制中"
+		}
+		return "已开始直播,未开启自动录制"
+	case consts.LiveStatusStop:
+		if autoRecord {
+			return "已结束直播,录制已停止"
+		}
+		return "已结束直播"
+	default:
+		return "直播状态未知"
+	}
+}
+
 // SendNotification 发送统一通知函数
 // 检测用户是否开启了telegram和email通知服务，然后分别发送通知
 // 参数: logger(LiveLogger), hostName(主播姓名), platform(直播平台), liveURL(直播地址), status(直播状态: consts.LiveStatusStart/consts.LiveStatusStop)
@@ -30,16 +74,9 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 		return fmt.Errorf("configuration is nil")
 	}
 
-	// 根据状态设置消息内容
-	var messageStatus string
-	switch status {
-	case consts.LiveStatusStart:
-		messageStatus = "已开始直播,正在录制中"
-	case consts.LiveStatusStop:
-		messageStatus = "已结束直播,录制已停止"
-	default:
-		messageStatus = "直播状态未知"
-	}
+	// 根据房间的实际设置（自动录像 / 仅监控）决定通知文案
+	mode := resolveRoomNotifyMode(cfg, liveURL)
+	messageStatus := liveStatusText(status, mode.autoRecord)
 
 	// 统一主播信息格式
 	hostInfo := fmt.Sprintf("%s,%s", hostName, messageStatus)
@@ -81,13 +118,6 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 		var err error
 		switch status {
 		case consts.LiveStatusStart:
-			// 从配置中获取scheme URL
-			var schemeUrl string
-			// 根据liveURL查找对应的LiveRoom配置
-			if liveRoom, lookupErr := cfg.GetLiveRoomByUrl(liveURL); lookupErr == nil {
-				schemeUrl = liveRoom.SchemeUrl
-			}
-
 			// 发送Ntfy开始录制通知
 			err = ntfy.SendMessage(
 				cfg.Notify.Ntfy.URL,
@@ -96,7 +126,8 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 				hostName,
 				platform,
 				liveURL,
-				schemeUrl,
+				mode.schemeUrl,
+				mode.autoRecord,
 			)
 		case consts.LiveStatusStop:
 			// 发送Ntfy停止录制通知
@@ -107,6 +138,7 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 				hostName,
 				platform,
 				liveURL,
+				mode.autoRecord,
 			)
 		}
 
@@ -130,6 +162,7 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 				hostName,
 				platform,
 				liveURL,
+				mode.autoRecord,
 			)
 		case consts.LiveStatusStop:
 			err = bark.SendStopMessage(
@@ -142,6 +175,7 @@ func SendNotification(logger *livelogger.LiveLogger, hostName, platform, liveURL
 				hostName,
 				platform,
 				liveURL,
+				mode.autoRecord,
 			)
 		}
 		if err != nil {

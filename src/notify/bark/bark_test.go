@@ -21,7 +21,7 @@ func TestSendRequest_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendMessage(server.URL, "test_key", "alarm", "test-group", "", "", "主播A", "bilibili", "https://live.bilibili.com/123")
+	err := SendMessage(server.URL, "test_key", "alarm", "test-group", "", "", "主播A", "bilibili", "https://live.bilibili.com/123", true)
 	assert.NoError(t, err)
 	assert.Equal(t, "test_key", received.DeviceKey)
 	assert.Equal(t, "主播A 开始直播", received.Title)
@@ -40,10 +40,40 @@ func TestSendStopMessage_Format(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendStopMessage(server.URL, "test_key", "", "", "", "", "主播B", "douyin", "https://live.douyin.com/789")
+	err := SendStopMessage(server.URL, "test_key", "", "", "", "", "主播B", "douyin", "https://live.douyin.com/789", true)
 	assert.NoError(t, err)
 	assert.Equal(t, "主播B 直播结束", received.Title)
 	assert.Equal(t, "平台：douyin\n录制已停止", received.Body)
+}
+
+// TestSendMessage_OnlyMonitor 仅监控（未开启自动录像）的直播间不应提示"正在录制中"
+func TestSendMessage_OnlyMonitor(t *testing.T) {
+	var received BarkMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&received)
+		json.NewEncoder(w).Encode(BarkResponse{Code: 200, Message: "success"})
+	}))
+	defer server.Close()
+
+	err := SendMessage(server.URL, "test_key", "", "", "", "", "主播C", "bilibili", "https://live.bilibili.com/456", false)
+	assert.NoError(t, err)
+	assert.Equal(t, "主播C 开始直播", received.Title)
+	assert.Equal(t, "平台：bilibili\n未开启自动录制，仅监控", received.Body)
+}
+
+// TestSendStopMessage_OnlyMonitor 仅监控的直播间结束时不应提示"录制已停止"
+func TestSendStopMessage_OnlyMonitor(t *testing.T) {
+	var received BarkMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&received)
+		json.NewEncoder(w).Encode(BarkResponse{Code: 200, Message: "success"})
+	}))
+	defer server.Close()
+
+	err := SendStopMessage(server.URL, "test_key", "", "", "", "", "主播D", "douyin", "https://live.douyin.com/789", false)
+	assert.NoError(t, err)
+	assert.Equal(t, "主播D 直播结束", received.Title)
+	assert.Equal(t, "平台：douyin\n直播已结束", received.Body)
 }
 
 func TestSendRequest_ServerError(t *testing.T) {
@@ -52,14 +82,14 @@ func TestSendRequest_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "")
+	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "bark push failed")
 	assert.Contains(t, err.Error(), "code=400")
 }
 
 func TestSendRequest_NetworkError(t *testing.T) {
-	err := SendMessage("http://127.0.0.1:1", "key", "", "", "", "", "host", "platform", "")
+	err := SendMessage("http://127.0.0.1:1", "key", "", "", "", "", "host", "platform", "", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to send bark request")
 }
@@ -73,7 +103,7 @@ func TestSendRequest_URLNormalization(t *testing.T) {
 	defer server.Close()
 
 	// serverURL 末尾带斜杠
-	err := SendMessage(server.URL+"/", "key", "", "", "", "", "host", "platform", "")
+	err := SendMessage(server.URL+"/", "key", "", "", "", "", "host", "platform", "", true)
 	assert.NoError(t, err)
 	assert.Equal(t, "/push", requestPath)
 }
@@ -87,12 +117,12 @@ func TestSendRequest_LiveURLPrefix(t *testing.T) {
 	defer server.Close()
 
 	// 无 http 前缀的 liveURL 应自动补全 https://
-	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "live.bilibili.com/123")
+	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "live.bilibili.com/123", true)
 	assert.NoError(t, err)
 	assert.Equal(t, "https://live.bilibili.com/123", received.URL)
 
 	// 已有 http:// 前缀不应重复添加
-	err = SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "http://live.bilibili.com/123")
+	err = SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "http://live.bilibili.com/123", true)
 	assert.NoError(t, err)
 	assert.Equal(t, "http://live.bilibili.com/123", received.URL)
 }
@@ -106,7 +136,7 @@ func TestSendRequest_OptionalFieldsOmitted(t *testing.T) {
 	defer server.Close()
 
 	// sound/icon/group/level/url 全部为空
-	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "")
+	err := SendMessage(server.URL, "key", "", "", "", "", "host", "platform", "", true)
 	assert.NoError(t, err)
 	// omitempty 字段不应出现在 JSON 中
 	_, hasSound := rawJSON["sound"]
