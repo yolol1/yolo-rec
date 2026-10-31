@@ -14,6 +14,9 @@ func RegisterBuiltinStages(executor *pipeline.Executor) {
 	// TS 转换 (Remuxing)
 	executor.RegisterStage(pipeline.StageNameConvertTs, NewConvertTsStage)
 
+	// TS 时间戳与索引修复
+	executor.RegisterStage(pipeline.StageNameRepairTs, NewRepairTsStage)
+
 	// 弹幕字幕烧录
 	executor.RegisterStage(pipeline.StageNameBurnSubtitles, NewBurnSubtitlesStage)
 
@@ -46,6 +49,9 @@ func RegisterBuiltinStagesToManager(manager *pipeline.Manager) {
 
 	// TS 转换 (Remuxing)
 	manager.RegisterStage(pipeline.StageNameConvertTs, NewConvertTsStage)
+
+	// TS 时间戳与索引修复
+	manager.RegisterStage(pipeline.StageNameRepairTs, NewRepairTsStage)
 
 	// 弹幕字幕烧录
 	manager.RegisterStage(pipeline.StageNameBurnSubtitles, NewBurnSubtitlesStage)

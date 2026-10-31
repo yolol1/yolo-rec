@@ -177,7 +177,8 @@ func DecorateConfigNode(node *yaml.Node) {
 # 注意：启用后会在本地启动一个 FLV 代理服务器，FFmpeg 从代理读取流`, "")
 		setFieldComment(featureNode, "save_as_ts",
 			`# 是否自动将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
-# 默认启用，如需关闭请设置为 false`, "")
+# 默认启用，如需关闭请设置为 false
+# TS 录制结束后会自动执行无损时间戳修复，避免进度条为 0 或音频轨道无法识别`, "")
 		setFieldComment(featureNode, "twitch_disable_ads_proxy",
 			`# Twitch 的去广告 M3U8 代理地址
 # 为空时使用默认直连，如有卡顿或快进现象可配置代理，如: https://api.ttv.lol/playlist/{{ .Login }}.m3u8`, "")

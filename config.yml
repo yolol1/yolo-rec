@@ -17,6 +17,7 @@ feature:
   remove_symbol_other_character: false
   # 是否自动将录制视频保存/转封装为 TS 格式（推荐开启，解决 FLV 拖动进度条卡顿问题）
   # 默认启用，如需关闭请设置为 false
+  # TS 录制结束后会自动执行无损时间戳修复，避免进度条为 0 或音频轨道无法识别
   save_as_ts: true
 # '{{ .Live.GetPlatformCNName }}/{{ .HostName | filenameFilter }}/[{{ now | date "2006-01-02 15-04-05"}}][{{ .HostName | filenameFilter }}][{{ .RoomName | filenameFilter }}].flv'
 # ./平台名称/主播名字/[时间戳][主播名字][房间名字].flv

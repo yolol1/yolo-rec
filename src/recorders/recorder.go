@@ -761,6 +761,11 @@ func (r *recorder) tryRecord(ctx context.Context) {
 			}
 		}
 
+		// TS 直播封装在切流、网络抖动或异常退出时可能留下不连续的时间戳。
+		// 录制结束后统一重写一次 MPEG-TS，重建时间戳和周期表，避免播放器
+		// 出现进度条为 0、无法拖动或无法识别音频轨道的问题。
+		addTSRepairStage(pipelineConfig, outputFiles, resolvedConfig.Feature.SaveAsTS)
+
 		// 如果没有配置任何处理阶段，跳过
 		if len(pipelineConfig.Stages) == 0 {
 			r.getLogger().Debug("no pipeline stages configured, skipping post-processing")
@@ -774,6 +779,67 @@ func (r *recorder) tryRecord(ctx context.Context) {
 			r.getLogger().Infof("pipeline task enqueued: %d files, %d stages", len(outputFiles), len(pipelineConfig.Stages))
 		}
 	}
+}
+
+// addTSRepairStage 为会产生 TS 文件的任务补充无损修复阶段。
+// 优先放在 convert_ts 后；没有转换阶段时放在 fix_flv 后；否则放到最前面。
+func addTSRepairStage(config *pipeline.PipelineConfig, outputFiles []string, saveAsTS bool) {
+	if config == nil {
+		return
+	}
+
+	needsRepair := false
+	hasFLV := false
+	for _, file := range outputFiles {
+		switch strings.ToLower(filepath.Ext(file)) {
+		case ".ts":
+			needsRepair = true
+		case ".flv":
+			hasFLV = true
+		}
+	}
+	if hasFLV && saveAsTS {
+		needsRepair = true
+	}
+	if !needsRepair {
+		return
+	}
+
+	for _, stage := range config.Stages {
+		if stage.Name == pipeline.StageNameRepairTs {
+			return
+		}
+	}
+
+	repairStage := pipeline.StageConfig{
+		Name:              pipeline.StageNameRepairTs,
+		Enabled:           pipeline.EnabledPtr(true),
+		ContinueOnFailure: pipeline.EnabledPtr(true),
+	}
+
+	insertAfter := -1
+	for idx, stage := range config.Stages {
+		if stage.Name == pipeline.StageNameConvertTs {
+			insertAfter = idx
+			break
+		}
+	}
+	if insertAfter < 0 {
+		for idx, stage := range config.Stages {
+			if stage.Name == pipeline.StageNameFixFlv {
+				insertAfter = idx
+				break
+			}
+		}
+	}
+
+	if insertAfter < 0 {
+		config.Stages = append([]pipeline.StageConfig{repairStage}, config.Stages...)
+		return
+	}
+
+	config.Stages = append(config.Stages[:insertAfter+1],
+		append([]pipeline.StageConfig{repairStage}, config.Stages[insertAfter+1:]...)...)
 }
 
 // stopRetryForExplicitOffline 在平台已明确给出“已下播”信号时补发一次 LiveEnd，
@@ -904,13 +970,13 @@ func (r *recorder) run(ctx context.Context) {
 		default:
 			// 每次 tryRecord 使用独立的子 context
 			// tryRecord 返回时 cancel 会停止所有异步操作（如 HLS 探测 goroutine）
-			
+
 			// 磁盘空间检查
 			cfg := configs.GetCurrentConfig()
 			room, _ := cfg.GetLiveRoomByUrl(r.Live.GetRawUrl())
 			platformKey := configs.GetPlatformKeyFromUrl(r.Live.GetRawUrl())
 			resolvedConfig := cfg.ResolveConfigForRoom(room, platformKey)
-			
+
 			if resolvedConfig.MinFreeSpace > 0 {
 				if free, err := utils.GetDiskFreeSpace(resolvedConfig.OutPutPath); err == nil {
 					if free < uint64(resolvedConfig.MinFreeSpace)*1024*1024 {

@@ -221,7 +221,9 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 
 	// 对于 TS 录制，增加 nobuffer 优化延迟
 	if strings.HasSuffix(strings.ToLower(file), ".ts") {
-		args = append(args, "-fflags", "nobuffer")
+		// genpts 可以在直播源缺少可靠 PTS 时重新生成显示时间戳，
+		// 避免录制出的 TS 在部分播放器中显示时长为 0 或无法拖动。
+		args = append(args, "-fflags", "nobuffer+genpts")
 	}
 
 	// 使用代理时，不需要设置 User-Agent 和 Referer（代理会处理）
@@ -245,6 +247,13 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 		p.logger.Info("只录音频模式已启用，将忽略视频流")
 	}
 
+	// 显式映射首路视频和全部音频，避免输入中的附加数据流干扰封装。
+	if p.audioOnly {
+		args = append(args, "-map", "0:a?")
+	} else {
+		args = append(args, "-map", "0:v:0?", "-map", "0:a?")
+	}
+
 	args = append(args, "-c", "copy", "-max_muxing_queue_size", "9999")
 
 	// 如果是转封装为 TS 格式且输入流是 FLV 流，添加相应的比特流过滤器
@@ -260,7 +269,11 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 
 	// 强制以 mpegts 格式输出
 	if strings.HasSuffix(strings.ToLower(file), ".ts") {
-		args = append(args, "-f", "mpegts")
+		args = append(args,
+			"-avoid_negative_ts", "make_zero",
+			"-mpegts_flags", "+resend_headers+initial_discontinuity",
+			"-f", "mpegts",
+		)
 	}
 
 	// 不使用代理时，添加额外的请求头
@@ -294,16 +307,16 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 			err = fmt.Errorf("parser is already stopped")
 			return
 		}
-		
+
 		// 动态替换 User-Agent 避免 Twitch 阻断
 		for i, a := range args {
 			if a == "-user_agent" && i+1 < len(args) {
 				args[i+1] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 			}
 		}
-		
+
 		p.cmd = exec.Command(ffmpegPath, args...)
-		
+
 		// 继承并注入代理环境变量，解决 Windows 下 FFmpeg 无法读取系统代理的问题
 		env := os.Environ()
 		proxyEnvVars := proxy.GetDownloadProxyEnvVars()
@@ -313,7 +326,7 @@ func (p *Parser) ParseLiveStream(ctx context.Context, streamUrlInfo *live.Stream
 			req, _ := http.NewRequest("GET", inputURL, nil)
 			if proxyURL, err := http.ProxyFromEnvironment(req); err == nil && proxyURL != nil {
 				proxyStr := proxyURL.String()
-				env = append(env, 
+				env = append(env,
 					"HTTP_PROXY="+proxyStr,
 					"HTTPS_PROXY="+proxyStr,
 					"http_proxy="+proxyStr,

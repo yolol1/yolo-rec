@@ -9,6 +9,7 @@ const (
 	StageNameFixFlv        = "fix_flv"
 	StageNameConvertMp4    = "convert_mp4"
 	StageNameConvertTs     = "convert_ts"
+	StageNameRepairTs      = "repair_ts"
 	StageNameExtractCover  = "extract_cover"
 	StageNameCloudUpload   = "cloud_upload"
 	StageNameBiliPublish   = "bili_publish"

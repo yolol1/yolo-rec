@@ -288,6 +288,8 @@ class PipelineTaskList extends Component<object, PipelineTaskListState> {
     const labels: Record<string, string> = {
       'fix_flv': '修复FLV',
       'convert_mp4': '转换MP4',
+      'convert_ts': '转换TS',
+      'repair_ts': '修复TS时间轴',
       'extract_cover': '提取封面',
       'bili_publish': 'B站投稿',
       'cloud_upload': '云盘上传',
