@@ -113,17 +113,6 @@ func initMux(ctx context.Context) *mux.Router {
 	apiRoute.HandleFunc("/webui/remote/status", getRemoteWebuiStatus).Methods("GET")  // 获取远程 WebUI 状态
 	apiRoute.HandleFunc("/webui/remote/check", checkRemoteWebuiUpdate).Methods("GET") // 检查远程 WebUI 更新
 	apiRoute.HandleFunc("/memory", getMemoryStats).Methods("GET")                     // 获取内存统计信息
-	// 更新 API 路由
-	apiRoute.HandleFunc("/update/check", checkUpdate).Methods("GET")          // 检查更新
-	apiRoute.HandleFunc("/update/latest", getLatestRelease).Methods("GET")    // 获取最新版本信息
-	apiRoute.HandleFunc("/update/download", downloadUpdate).Methods("POST")   // 下载更新
-	apiRoute.HandleFunc("/update/status", getUpdateStatus).Methods("GET")     // 获取更新状态
-	apiRoute.HandleFunc("/update/apply", applyUpdate).Methods("POST")         // 应用更新
-	apiRoute.HandleFunc("/update/cancel", cancelUpdate).Methods("POST")       // 取消下载
-	apiRoute.HandleFunc("/update/channel", setUpdateChannel).Methods("PUT")   // 设置更新通道
-	apiRoute.HandleFunc("/update/launcher", getLauncherStatus).Methods("GET") // 获取启动器状态
-	apiRoute.HandleFunc("/update/rollback", getRollbackInfo).Methods("GET")   // 获取回滚信息
-	apiRoute.HandleFunc("/update/rollback", doRollback).Methods("POST")       // 执行回滚
 	apiRoute.Handle("/metrics", promhttp.Handler())
 
 	// IO 统计 API 路由
@@ -156,11 +145,7 @@ func initMux(ctx context.Context) *mux.Router {
 		CORSMiddleware(
 			http.StripPrefix(
 				"/files/",
-				http.FileServer(
-					http.Dir(
-						configs.GetCurrentConfig().OutPutPath,
-					),
-				),
+				newOutputFileHandler(configs.GetCurrentConfig().OutPutPath),
 			),
 		),
 	)
@@ -296,11 +281,4 @@ func setupRecorderStatusBroadcast() {
 		GetSSEHub().BroadcastRecorderStatus(liveId, status)
 	})
 
-	// 设置录制结束回调，用于触发优雅更新检查
-	recorders.SetOnRecordingEndFunc(func(ctx context.Context) {
-		// 延迟一小段时间，确保录制器已完全关闭
-		if CheckGracefulUpdate(ctx) {
-			applog.GetLogger().Info("所有录制已结束，开始执行优雅更新")
-		}
-	})
 }

@@ -411,26 +411,6 @@ var defaultOpenListConfig = OpenListConfig{
 	DataPath: "", // 默认使用 AppDataPath/openlist
 }
 
-// UpdateConfig 自动更新配置
-type UpdateConfig struct {
-	// AutoCheck 是否启用自动检查更新（默认 true）
-	AutoCheck bool `yaml:"auto_check" json:"auto_check"`
-	// CheckIntervalHours 检查更新间隔（小时，默认 6）
-	CheckIntervalHours int `yaml:"check_interval_hours" json:"check_interval_hours"`
-	// AutoDownload 是否自动下载更新（默认 true）
-	// false 时仅检查并通知，需用户手动触发下载
-	AutoDownload bool `yaml:"auto_download" json:"auto_download"`
-	// IncludePrerelease 是否包含预发布版本（默认 false）
-	IncludePrerelease bool `yaml:"include_prerelease" json:"include_prerelease"`
-}
-
-var defaultUpdateConfig = UpdateConfig{
-	AutoCheck:          true,
-	CheckIntervalHours: 6,
-	AutoDownload:       true,
-	IncludePrerelease:  false,
-}
-
 // StreamPreference 流偏好配置
 // 采用指针模式以区分"未设置"和"设置为零值"
 type StreamPreference struct {
@@ -539,9 +519,6 @@ type Config struct {
 
 	// OpenList 配置
 	OpenList OpenListConfig `yaml:"openlist" json:"openlist"`
-
-	// 自动更新配置
-	Update UpdateConfig `yaml:"update" json:"update"`
 
 	// 平台特定配置（层级覆盖，使用 OverridableConfig 中的指针模式）
 	PlatformConfigs map[string]PlatformConfig `yaml:"platform_configs,omitempty" json:"platform_configs,omitempty"`
@@ -1029,7 +1006,6 @@ var defaultConfig = Config{
 
 	Proxy:           defaultProxy,
 	OpenList:        defaultOpenListConfig,
-	Update:          defaultUpdateConfig,
 	PlatformConfigs: map[string]PlatformConfig{},
 }
 
@@ -1042,10 +1018,6 @@ func NewConfig() *Config {
 }
 
 func newConfigPostProcess(c *Config) {
-	// 若运行在容器内，且未显式指定只读工具目录，则设置为容器内预置目录
-	if isInContainer() && strings.TrimSpace(c.ReadOnlyToolFolder) == "" {
-		c.ReadOnlyToolFolder = "/opt/bililive/tools"
-	}
 	if c.AppDataPath == "" {
 		c.AppDataPath = filepath.Join(c.OutPutPath, ".appdata")
 	}
@@ -1058,37 +1030,6 @@ func newConfigPostProcess(c *Config) {
 		douyinCfg.MinAccessIntervalSec = 3
 		c.PlatformConfigs["douyin"] = douyinCfg
 	}
-}
-
-// configMinimal 是配置文件的最小子集，仅包含 launcher 决策所需的字段。
-// 使用独立的小结构体而非完整 Config，确保即使完整配置格式在版本间发生不兼容变更，
-// launcher 检查阶段仍能正常工作（Docker 不停机升级的关键保障）。
-type configMinimal struct {
-	AppDataPath string `yaml:"app_data_path"`
-	OutPutPath  string `yaml:"out_put_path"`
-}
-
-// ReadAppDataPathFromFile 从配置文件中仅解析 app_data_path 字段。
-// 使用最小结构体解析，不受完整配置结构体变更的影响。
-// 若 app_data_path 为空，则按照 Config 的默认逻辑回退到 out_put_path/.appdata。
-func ReadAppDataPathFromFile(file string) (string, error) {
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return "", err
-	}
-	var minimal configMinimal
-	// 即使配置文件中有未知字段或类型不兼容的字段，
-	// yaml.Unmarshal 也只会解析 minimal 中定义的字段，不会报错
-	if err := yaml.Unmarshal(b, &minimal); err != nil {
-		return "", err
-	}
-	if minimal.AppDataPath != "" {
-		return minimal.AppDataPath, nil
-	}
-	if minimal.OutPutPath != "" {
-		return filepath.Join(minimal.OutPutPath, ".appdata"), nil
-	}
-	return "", nil
 }
 
 // Verify will return an error when this config has problem.

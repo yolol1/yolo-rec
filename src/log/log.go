@@ -34,9 +34,6 @@ func New(ctx context.Context) *interfaces.Logger {
 	// 收集需要在关闭时释放的文件句柄
 	var closers []io.Closer
 
-	// 检测是否由 Launcher 启动（版本切换场景）
-	isLauncherManaged := os.Getenv("BILILIVE_LAUNCHER") == "1"
-
 	outputFolder := config.Log.OutPutFolder
 	if _, err := os.Stat(outputFolder); os.IsNotExist(err) {
 		log.Fatalf("err: \"%s\", Failed to determine log output folder: %s", err, outputFolder)
@@ -53,15 +50,10 @@ func New(ctx context.Context) *interfaces.Logger {
 			}
 		}
 		if config.Log.SaveLastLog {
-			// 由 Launcher 启动时（版本切换）不清理旧日志
-			// 因为前一版本的进程可能仍持有日志文件的写入句柄
-			// 在 Linux/Docker 上删除会导致前一版本的最后日志丢失
-			if !isLauncherManaged {
-				purgePattern := filepath.Join(outputFolder, "bililive-go-*.log")
-				matches, _ := filepath.Glob(purgePattern)
-				for _, f := range matches {
-					_ = os.Remove(f)
-				}
+			purgePattern := filepath.Join(outputFolder, "bililive-go-*.log")
+			matches, _ := filepath.Glob(purgePattern)
+			for _, f := range matches {
+				_ = os.Remove(f)
 			}
 			// 按天滚动写入日志（使用 O_APPEND 追加模式，不会覆盖已有内容）
 			rot := newDailyRotatingWriter(outputFolder, "bililive-go", config.Log.RotateDays)
@@ -120,11 +112,6 @@ func New(ctx context.Context) *interfaces.Logger {
 			}
 		}
 	})
-
-	// 版本切换场景：写入分隔标记
-	if isLauncherManaged {
-		logrus.Infof("====== 由 Launcher 启动（版本切换） ======")
-	}
 
 	return &interfaces.Logger{Logger: logrus.StandardLogger()}
 }

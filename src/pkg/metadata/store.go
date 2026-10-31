@@ -202,8 +202,6 @@ const (
 	NamespaceDevice = "device"
 	// NamespaceConfig 配置信息
 	NamespaceConfig = "config"
-	// NamespaceUpdate 升级相关状态
-	NamespaceUpdate = "update"
 	// NamespaceMigration 数据库迁移状态
 	NamespaceMigration = "migration"
 )

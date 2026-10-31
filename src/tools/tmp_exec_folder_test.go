@@ -19,17 +19,11 @@ func TestResolveTmpExecRootFolder(t *testing.T) {
 		return
 	}
 
-	t.Setenv("IS_DOCKER", "true")
-	if got := resolveTmpExecRootFolder(); got != "/opt/bililive/tmp_for_exec" {
-		t.Fatalf("容器内应沿用 /opt/bililive/tmp_for_exec，实际返回 %q", got)
-	}
-
-	t.Setenv("IS_DOCKER", "")
 	got := resolveTmpExecRootFolder()
 	if !filepath.IsAbs(got) {
-		t.Fatalf("非容器 Linux 应返回绝对路径，实际返回 %q", got)
+		t.Fatalf("Linux 应返回绝对路径，实际返回 %q", got)
 	}
 	if !strings.HasSuffix(got, filepath.Join("bililive-go", "tmp_for_exec")) {
-		t.Fatalf("非容器 Linux 应返回系统临时目录下的路径，实际返回 %q", got)
+		t.Fatalf("Linux 应返回系统临时目录下的路径，实际返回 %q", got)
 	}
 }

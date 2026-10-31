@@ -16,7 +16,8 @@ help:
 	@echo "  make build-web        - Build frontend"
 	@echo "  make generate         - Run go generate"
 	@echo "  make clean            - Clean build artifacts"
-	@echo "  make lint             - Run linter"
+	@echo "  make lint             - Lint changes relative to origin/master"
+	@echo "  make lint-full        - Run linter over the entire codebase"
 	@echo "  make release          - Build release for all platforms"
 
 build: bililive
@@ -66,10 +67,6 @@ release: build-web generate
 release-no-web: generate
 	@./src/hack/release.sh
 
-.PHONY: release-docker
-release-docker:
-	@./src/hack/release-docker.sh
-
 .PHONY: test
 test:
 	@go run build.go test
@@ -91,7 +88,11 @@ build-web:
 
 .PHONY: lint
 lint:
-	golangci-lint run --path-mode=abs --build-tags=dev
+	golangci-lint run --build-tags=dev --new-from-rev=origin/master ./...
+
+.PHONY: lint-full
+lint-full:
+	golangci-lint run --build-tags=dev ./...
 
 # 同步 AGENTS.md 到其他 AI 指示文件
 .PHONY: sync-agents

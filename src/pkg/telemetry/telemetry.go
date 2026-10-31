@@ -27,8 +27,6 @@ type EventType string
 const (
 	// EventStartup 程序启动事件
 	EventStartup EventType = "startup"
-	// EventUpdate 更新事件
-	EventUpdate EventType = "update"
 )
 
 // Telemetry 统计客户端
@@ -139,9 +137,4 @@ func (t *Telemetry) sendEventSync(ctx context.Context, event EventType) error {
 // SendStartup 发送启动事件的便捷方法
 func (t *Telemetry) SendStartup(ctx context.Context) {
 	t.SendEvent(ctx, EventStartup)
-}
-
-// SendUpdate 发送更新事件的便捷方法
-func (t *Telemetry) SendUpdate(ctx context.Context) {
-	t.SendEvent(ctx, EventUpdate)
 }

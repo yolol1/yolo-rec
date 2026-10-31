@@ -19,15 +19,15 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/tidwall/gjson"
 
-	"github.com/bililive-go/bililive-go/src/consts"
 	"github.com/bililive-go/bililive-go/src/configs"
+	"github.com/bililive-go/bililive-go/src/consts"
 	"github.com/bililive-go/bililive-go/src/instance"
 	"github.com/bililive-go/bililive-go/src/listeners"
 	"github.com/bililive-go/bililive-go/src/live"
 	"github.com/bililive-go/bililive-go/src/livestate"
 	applog "github.com/bililive-go/bililive-go/src/log"
-	"github.com/bililive-go/bililive-go/src/pkg/livelogger"
 	"github.com/bililive-go/bililive-go/src/pkg/events"
+	"github.com/bililive-go/bililive-go/src/pkg/livelogger"
 	"github.com/bililive-go/bililive-go/src/pkg/memstats"
 	"github.com/bililive-go/bililive-go/src/pkg/ratelimit"
 	"github.com/bililive-go/bililive-go/src/pkg/utils"
@@ -88,7 +88,7 @@ func parseInfo(ctx context.Context, l live.Live, preFetchedRoom ...*livestate.Li
 		} else {
 			dbRoom, _ = store.GetLiveRoom(ctx, string(l.GetLiveId()))
 		}
-		
+
 		if dbRoom != nil {
 			if l.GetLastEndTime().IsZero() && !dbRoom.LastEndTime.IsZero() {
 				l.SetLastEndTime(dbRoom.LastEndTime)
@@ -1828,22 +1828,6 @@ func applyConfigUpdates(c *configs.Config, updates map[string]interface{}) error
 					c.StreamPreference.Attributes = nil
 				}
 			}
-		}
-	}
-
-	// 处理自动更新配置
-	if update, ok := updates["update"].(map[string]interface{}); ok {
-		if autoCheck, ok := update["auto_check"].(bool); ok {
-			c.Update.AutoCheck = autoCheck
-		}
-		if checkIntervalHours, ok := update["check_interval_hours"].(float64); ok {
-			c.Update.CheckIntervalHours = int(checkIntervalHours)
-		}
-		if autoDownload, ok := update["auto_download"].(bool); ok {
-			c.Update.AutoDownload = autoDownload
-		}
-		if includePrerelease, ok := update["include_prerelease"].(bool); ok {
-			c.Update.IncludePrerelease = includePrerelease
 		}
 	}
 

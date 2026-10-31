@@ -2,8 +2,7 @@ import React from "react";
 import API from '../../utils/api';
 import {
     Descriptions,
-    Button,
-    Tag
+    Button
 } from 'antd';
 import copy from 'copy-to-clipboard';
 
@@ -21,13 +20,6 @@ interface IState {
     pid: string
     platform: string
     goVersion: string
-    isDocker: string
-    puid: string
-    pgid: string
-    umask: string
-    isLauncherManaged: boolean
-    launcherPid: number
-    launcherExePath: string
     bgoExePath: string
 }
 
@@ -43,13 +35,6 @@ class LiveInfo extends React.Component<Props, IState> {
             pid: "",
             platform: "",
             goVersion: "",
-            isDocker: "",
-            puid: "",
-            pgid: "",
-            umask: "",
-            isLauncherManaged: false,
-            launcherPid: 0,
-            launcherExePath: "",
             bgoExePath: ""
         };
     }
@@ -65,13 +50,6 @@ class LiveInfo extends React.Component<Props, IState> {
                     pid: rsp.pid,
                     platform: rsp.platform,
                     goVersion: rsp.go_version,
-                    isDocker: rsp.is_docker,
-                    puid: rsp.puid,
-                    pgid: rsp.pgid,
-                    umask: rsp.umask,
-                    isLauncherManaged: rsp.is_launcher_managed || false,
-                    launcherPid: rsp.launcher_pid || 0,
-                    launcherExePath: rsp.launcher_exe_path || "",
                     bgoExePath: rsp.bgo_exe_path || ""
                 })
             })
@@ -80,17 +58,7 @@ class LiveInfo extends React.Component<Props, IState> {
             })
     }
 
-    isInContainer(): boolean {
-        const v = (this.state.isDocker || "").toLowerCase();
-        return v === "true";
-    }
-
     getTextForCopy(): string {
-        const inContainer = this.isInContainer();
-        const extra = inContainer ? `\nPUID: ${this.state.puid}\nPGID: ${this.state.pgid}\nUMASK: ${this.state.umask}` : "";
-        const launcherInfo = this.state.isLauncherManaged
-            ? `\nLauncher Managed: 是\nLauncher PID: ${this.state.launcherPid}\nLauncher Path: ${this.state.launcherExePath}`
-            : `\nLauncher Managed: 否`;
         return `
 App Name: ${this.state.appName}
 App Version: ${this.state.appVersion}
@@ -100,7 +68,6 @@ BGO Path: ${this.state.bgoExePath}
 Platform: ${this.state.platform}
 Go Version: ${this.state.goVersion}
 Git Hash: ${this.state.gitHash}
-Is In Container: ${inContainer ? "是" : "否"}${extra}${launcherInfo}
 `;
     }
 
@@ -130,23 +97,6 @@ Is In Container: ${inContainer ? "是" : "否"}${extra}${launcherInfo}
                     <Descriptions.Item label="Platform">{this.state.platform}</Descriptions.Item>
                     <Descriptions.Item label="Go Version">{this.state.goVersion}</Descriptions.Item>
                     <Descriptions.Item label="Git Hash">{this.state.gitHash}</Descriptions.Item>
-                    <Descriptions.Item label="Is In Container">{this.isInContainer() ? "是" : "否"}</Descriptions.Item>
-                    {this.isInContainer() && <Descriptions.Item label="PUID">{this.state.puid || ""}</Descriptions.Item>}
-                    {this.isInContainer() && <Descriptions.Item label="PGID">{this.state.pgid || ""}</Descriptions.Item>}
-                    {this.isInContainer() && <Descriptions.Item label="UMASK">{this.state.umask || ""}</Descriptions.Item>}
-                    <Descriptions.Item label="启动器模式">
-                        {this.state.isLauncherManaged ? (
-                            <Tag color="purple">由启动器管理</Tag>
-                        ) : (
-                            <Tag>独立运行</Tag>
-                        )}
-                    </Descriptions.Item>
-                    {this.state.isLauncherManaged && (
-                        <Descriptions.Item label="Launcher PID">{this.state.launcherPid || "-"}</Descriptions.Item>
-                    )}
-                    {this.state.isLauncherManaged && (
-                        <Descriptions.Item label="Launcher Path">{this.state.launcherExePath || "-"}</Descriptions.Item>
-                    )}
                 </Descriptions>
                 <Button
                     type="default"

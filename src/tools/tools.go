@@ -59,7 +59,7 @@ func IsBToolsStarting() bool {
 // Cleanup 关闭所有通过 tools 包管理的资源：
 // - 终止所有已注册的子进程（btools、klive 等）
 // - 关闭 remotetools WebUI 服务器
-// 在进入 launcher 模式前调用，确保端口被释放以供新版本使用。
+// 在进程退出前调用，确保所有子进程都被终止。
 func Cleanup() {
 	logger := blog.GetLogger()
 
@@ -124,65 +124,6 @@ func AsyncInit() {
 	})
 }
 
-func SyncBuiltInTools(targetToolFolder string) (err error) {
-	// 初始化 remotetools API 配置，避免未加载配置时获取工具失败
-	api := tools.Get()
-	if api == nil {
-		return errors.New("failed to get remotetools API instance")
-	}
-	cfgData, cfgErr := getConfigData()
-	if cfgErr != nil || cfgData == nil {
-		if cfgErr == nil {
-			cfgErr = errors.New("failed to get config data")
-		}
-		return cfgErr
-	}
-	if err = api.LoadConfigFromBytes(cfgData); err != nil {
-		return err
-	}
-
-	tools.SetRootFolder(targetToolFolder)
-	toolsToKeep := []tools.Tool{}
-	for _, toolName := range []string{
-		"ffmpeg",
-		"dotnet",
-		"bililive-recorder",
-		"node",
-		"biliLive-tools",
-	} {
-		var tool tools.Tool
-		tool, err = api.GetTool(toolName)
-		if err != nil {
-			blog.GetLogger().WithError(err).Warn("failed to get built-in tool:", toolName)
-			continue
-		}
-		if !tool.DoesToolExist() {
-			blog.GetLogger().Infoln("Installing built-in tool:", toolName)
-			err = tool.Install()
-			if err != nil {
-				return err
-			}
-		}
-		blog.GetLogger().Infoln("Built-in tool is ready:", toolName, "version:", tool.GetVersion())
-		toolsToKeep = append(toolsToKeep, tool)
-	}
-
-	_, err = api.DeleteAllExceptToolsInRoot(toolsToKeep)
-	if err != nil {
-		blog.GetLogger().WithError(err).Warn("failed to clean up unused built-in tools")
-		return
-	}
-	blog.GetLogger().Infoln("Built-in tools synchronized to", targetToolFolder)
-
-	return err
-}
-
-// isInDockerEnv 判断当前进程是否运行在本项目的 Docker 镜像内
-// （Dockerfile 中设置了 ENV IS_DOCKER=true）。
-func isInDockerEnv() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("IS_DOCKER")), "true")
-}
-
 // resolveTmpExecRootFolder 计算“存储目录不可执行”时用于运行外部工具的临时执行目录。
 //
 // 背景：remotetools 只在 Linux 上检测目录是否可执行（Windows/macOS 上直接视为可执行），
@@ -193,16 +134,12 @@ func isInDockerEnv() bool {
 //
 // 现在的规则：
 //   - 非 Linux：返回空串（该机制不适用，不创建任何目录）
-//   - Docker 容器内：沿用镜像预置的 /opt/bililive/tmp_for_exec
-//   - 其他 Linux：退回系统临时目录，避免依赖可能不存在或不可写的 /opt
+//   - Linux：使用系统临时目录
 //
 // 返回空串表示不设置该目录，remotetools 将直接使用工具存储目录。
 func resolveTmpExecRootFolder() string {
 	if runtime.GOOS != "linux" {
 		return ""
-	}
-	if isInDockerEnv() {
-		return "/opt/bililive/tmp_for_exec"
 	}
 	return filepath.Join(os.TempDir(), "bililive-go", "tmp_for_exec")
 }

@@ -19,24 +19,14 @@ import (
 // BroadcastRecorderStatusFunc 是用于广播录制器状态的回调函数类型
 type BroadcastRecorderStatusFunc func(liveId types.LiveID, status map[string]interface{})
 
-// OnRecordingEndFunc 是录制结束时的回调函数类型
-type OnRecordingEndFunc func(ctx context.Context)
-
 var (
 	// broadcastRecorderStatusFunc 全局广播函数，由 servers 包设置
 	broadcastRecorderStatusFunc BroadcastRecorderStatusFunc
-	// onRecordingEndFunc 录制结束时的回调函数，用于触发优雅更新检查
-	onRecordingEndFunc OnRecordingEndFunc
 )
 
 // SetBroadcastRecorderStatusFunc 设置录制器状态广播函数
 func SetBroadcastRecorderStatusFunc(fn BroadcastRecorderStatusFunc) {
 	broadcastRecorderStatusFunc = fn
-}
-
-// SetOnRecordingEndFunc 设置录制结束回调函数
-func SetOnRecordingEndFunc(fn OnRecordingEndFunc) {
-	onRecordingEndFunc = fn
 }
 
 func NewManager(ctx context.Context) Manager {
@@ -80,7 +70,7 @@ type manager struct {
 	// RestartRecorder 在释放锁后才执行 oldRecorder.CloseForRestart()，
 	// 此期间 map 中只有新 recorder，但旧 recorder 仍在收尾运行。
 	// 如果此时 LiveEnd 删掉新 recorder，GetActiveRecordingsCount() 仅看 map
-	// 会误判为"无活跃录制"导致优雅更新被提前触发。
+	// 会在录制重启期间误判为没有活跃录制。
 	// 通过 restartingCount 将收尾中的旧 recorder 也计入活跃数量。
 	restartingCount atomic.Int32
 }
@@ -231,23 +221,13 @@ func (m *manager) RestartRecorder(ctx context.Context, live live.Live) error {
 		return err
 	}
 	newRec := m.savers[live.GetLiveId()]
-	// restartingCount 必须在释放锁之前递增，否则 Unlock 到 Add(1) 之间
-	// LiveEnd 可能移除新 recorder 并看到 restartingCount==0，
-	// 导致 GetActiveRecordingsCount() 误判为"无活跃录制"触发优雅更新
+	// restartingCount 在释放锁之前递增，确保重启过程中仍被统计为活跃录制。
 	m.restartingCount.Add(1)
 	m.lock.Unlock()
 
 	// 2. 锁外执行耗时操作：关闭旧 recorder 并获取累积文件
-	// restartingCount 保证 CloseForRestart 期间旧 recorder 仍被计入活跃数量
 	defer func() {
 		m.restartingCount.Add(-1)
-		// 收尾完成后检查是否有等待中的优雅更新：
-		// 如果 LiveEnd 在 CloseForRestart 期间移除了新 recorder，
-		// 那次 CheckGracefulUpdate 会因 restartingCount>0 而跳过，
-		// 此处递减后需要再触发一次检查，避免优雅更新永久卡住。
-		if onRecordingEndFunc != nil {
-			bilisentry.GoWithContext(ctx, func(ctx context.Context) { onRecordingEndFunc(ctx) })
-		}
 	}()
 	oldFiles := oldRecorder.CloseForRestart()
 	live.GetLogger().Infof("分段重启录制，携带 %d 个历史文件", len(oldFiles))
@@ -270,22 +250,17 @@ func (m *manager) RestartRecorder(ctx context.Context, live live.Live) error {
 func (m *manager) RemoveRecorder(ctx context.Context, liveId types.LiveID) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	return m.removeRecorderLocked(ctx, liveId)
+	return m.removeRecorderLocked(liveId)
 }
 
-// removeRecorderLocked 是 RemoveRecorder 的内部实现，调用者必须已持有 m.lock
-func (m *manager) removeRecorderLocked(ctx context.Context, liveId types.LiveID) error {
+// removeRecorderLocked 是 RemoveRecorder 的内部实现，调用者必须已持有 m.lock。
+func (m *manager) removeRecorderLocked(liveId types.LiveID) error {
 	recorder, ok := m.savers[liveId]
 	if !ok {
 		return ErrRecorderNotExist
 	}
 	recorder.Close()
 	delete(m.savers, liveId)
-
-	// 录制结束后，检查是否有等待中的优雅更新
-	if onRecordingEndFunc != nil {
-		bilisentry.GoWithContext(ctx, func(ctx context.Context) { onRecordingEndFunc(ctx) })
-	}
 
 	return nil
 }

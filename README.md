@@ -2,7 +2,6 @@
 [![CI](https://github.com/bililive-go/bililive-go/actions/workflows/tests.yaml/badge.svg?branch=master)](https://github.com/bililive-go/bililive-go/actions/workflows/tests.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bililive-go/bililive-go)](https://goreportcard.com/report/github.com/bililive-go/bililive-go)
 [![Github release](https://img.shields.io/github/release/bililive-go/bililive-go.svg)](https://github.com/bililive-go/bililive-go/releases/latest)
-[![Docker Pulls](https://img.shields.io/docker/pulls/chigusa/bililive-go.svg)](https://hub.docker.com/r/chigusa/bililive-go/)
 [![Bilibili](https://img.shields.io/badge/%E5%93%94%E5%93%A9%E5%93%94%E5%93%A9-%E6%9C%AA%E6%9D%A5%E7%A7%91%E6%8A%80%E7%8E%8B%E8%80%81%E8%8F%8A%E5%BD%95%E6%92%AD%E7%BB%84-ebb8d0.svg)](https://space.bilibili.com/18578203/)
 
 Bililive-go是一个支持多种直播平台的直播录制工具   
@@ -162,11 +161,7 @@ https://github.com/bililive-go/bililive-go/assets/2352900/6453900c-6321-417b-94f
 
 ## Grafana 面板
 
-docker compose 用户可以取消项目根目录下 `docker-compose.yml` 文件中 prometheus 和 grafana 部分的注释以启用统计面板。  
-这里是 [设置说明](docs/grafana.md)
-
-非 docker compose 用户需要自行部署 prometheus 和 grafana。  
-这里是 [一些建议](docs/grafana.md#%E6%89%8B%E5%8A%A8%E5%AE%89%E8%A3%85%E7%AC%94%E8%AE%B0)
+需要自行部署 Prometheus 和 Grafana，设置说明见 [docs/grafana.md](docs/grafana.md)。
 
 ![image](https://github.com/bililive-go/bililive-go/raw/master/docs/dashboard.webp)
 
@@ -185,27 +180,6 @@ https://github.com/bililive-go/bililive-go/wiki/Install-macOS
 ### Linux
 https://github.com/bililive-go/bililive-go/wiki/Install-Linux
 
-### docker
-
-使用 https://hub.docker.com/r/chigusa/bililive-go 镜像创建容器运行。
-
-例如：
-```
-docker run --restart=always -v ~/config.yml:/etc/bililive-go/config.yml -v ~/Videos:/srv/bililive -p 8080:8080 -d chigusa/bililive-go
-```
-
-### docker compose
-
-使用项目根目录下的 `docker-compose.yml` 配置文件启动 docker compose 运行。
-
-例如：
-```
-docker compose up
-```
-此时默认使用 `config.docker.yml` 文件作为程序的配置文件，`Videos/` 目录作为录制视频的输出目录。
-
-NAS 用户使用系统自带 GUI 创建 docker compose 的情况请参考群晖用 docker compose 安装 bgo 的 [图文说明](./docs/Synology-related.md#如何用-docker-compose-安装-bgo)
-
 ## 常见问题
 [docs/FAQ.md](docs/FAQ.md)
 
@@ -219,7 +193,8 @@ NAS 用户使用系统自带 GUI 创建 docker compose 的情况请参考群晖�
 |------|----------|------|
 | [Go](https://golang.org/dl/) | 1.25+ | 后端开发语言 |
 | [GNU Make](https://www.gnu.org/software/make/) | 4.0+ | 构建工具（见下方安装说明） |
-| [Node.js](https://nodejs.org/) | 18+ | 前端构建 |
+| [Node.js](https://nodejs.org/) | 20.10.0 | 前端构建，版本以 `.node-version` 为准 |
+| [Yarn](https://classic.yarnpkg.com/) | 1.22.22 | 前端依赖管理 |
 | [Git](https://git-scm.com/) | - | 版本控制 |
 | [FFmpeg](https://ffmpeg.org/) | - | 可选，用于视频处理（程序会自动下载） |
 
@@ -252,7 +227,7 @@ cd bililive-go
 go generate ./tools/devtools.go
 
 # 3. 安装前端依赖并构建
-cd src/webapp && npm install && cd ../..
+cd src/webapp && yarn install --frozen-lockfile && cd ../..
 go run ./build.go build-web
 
 # 4. 运行开发版本
@@ -306,7 +281,8 @@ cp .vscode/tasks.example.json .vscode/tasks.json
 | 构建前端 | `go run ./build.go build-web` | `make build-web` |
 | 运行测试 | `go run ./build.go test` | `make test` |
 | 代码生成 | `go run ./build.go generate` | `make generate` |
-| 代码检查 | - | `make lint` |
+| 代码检查（增量） | - | `make lint` |
+| 全量代码检查 | - | `make lint-full` |
 | 清理产物 | - | `make clean` |
 | E2E 测试 | - | `make test-e2e` |
 | E2E 测试 (UI) | - | `make test-e2e-ui` |
@@ -346,12 +322,10 @@ bililive-go/
 │   ├── configs/       # 配置管理
 │   ├── live/          # 各平台直播解析
 │   ├── pkg/           # 通用包
-│   │   ├── launcher/  # 启动器（自动更新）
-│   │   └── update/    # 自动更新模块
 │   ├── recorders/     # 录制器实现
 │   ├── servers/       # HTTP API
 │   └── webapp/        # React 前端
-├── test/              # 测试工具（更新模拟服务等）
+├── test/              # 本地测试工具
 ├── tests/e2e/         # Playwright 端到端测试
 ├── tools/             # 开发工具依赖
 ├── config.yml         # 配置文件（用户创建）

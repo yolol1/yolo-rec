@@ -46,7 +46,6 @@ func RunCmd() int {
 	releaseCmd.Flag("arch", "目标架构（如 amd64、arm64）").StringVar(&customArch)
 	releaseCmd.Flag("no-telemetry", "禁用启动统计上报").BoolVar(&customNoTelemetry)
 	releaseCmd.Action(releaseBuild)
-	app.Command("release-docker", "Build for release docker.").Action(releaseDocker)
 	app.Command("test", "Run tests.").Action(goTest)
 	app.Command("generate", "go generate ./...").Action(goGenerate)
 	app.Command("build-web", "Build webapp.").Action(buildWeb)
@@ -91,11 +90,6 @@ func releaseBuild(c *kingpin.ParseContext) error {
 	return nil
 }
 
-func releaseDocker(c *kingpin.ParseContext) error {
-	fmt.Printf("release-docker command\n")
-	return nil
-}
-
 func goTest(c *kingpin.ParseContext) error {
 	return utils.ExecCommand([]string{
 		"go", "test",
@@ -112,26 +106,15 @@ func goGenerate(c *kingpin.ParseContext) error {
 
 func buildWeb(c *kingpin.ParseContext) error {
 	webappDir := filepath.Join("src", "webapp")
-	
-	// 优先使用 yarn，如果不可用则使用 npm
-	packageManager := "yarn"
+
 	if _, err := exec.LookPath("yarn"); err != nil {
-		packageManager = "npm"
+		return fmt.Errorf("未找到 yarn，请先安装 Yarn 1.22.22 或启用 Corepack: %w", err)
 	}
 
-	var commands [][]string
-	if packageManager == "yarn" {
-		commands = [][]string{
-			{"yarn", "install"},
-			{"yarn", "build"},
-		}
-	} else {
-		commands = [][]string{
-			{"npm", "install"},
-			{"npm", "run", "build"},
-		}
+	commands := [][]string{
+		{"yarn", "install", "--frozen-lockfile"},
+		{"yarn", "build"},
 	}
-
 	err := utils.ExecCommandsInDir(commands, webappDir)
 	if err != nil {
 		return err

@@ -134,7 +134,7 @@ func GetPIDsByCategory(category ProcessCategory) []int {
 }
 
 // KillAllProcesses 终止所有已注册的子进程（包括其子进程树）并等待它们退出。
-// 在进入 launcher 模式前调用，确保端口被释放以供新版本使用。
+// 在进程退出前调用，确保所有子进程都被终止。
 //
 // 使用 killProcessTree 而非 p.Kill() 来杀掉整个进程树，
 // 避免循环依赖：子进程的子进程持有管道 → cmd.Wait() 等管道关闭 →

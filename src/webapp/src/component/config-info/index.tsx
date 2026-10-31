@@ -431,7 +431,6 @@ const GLOBAL_SECTIONS: Array<{ key: string; href: string; title: string }> = [
   { key: 'cloud-upload', href: '#global-cloud-upload', title: '云盘上传' },
   { key: 'advanced', href: '#global-advanced', title: '高级设置' },
   ...(ENABLE_PROXY_CONFIG ? [{ key: 'proxy', href: '#global-proxy', title: '代理设置' }] : []),
-  { key: 'update', href: '#global-update', title: '自动更新设置' }
 ];
 
 // 获取设置页所在的滚动容器：
@@ -833,7 +832,7 @@ const GlobalSettings: React.FC<{
           </ConfigField>
           <ConfigField
             label="只读工具目录"
-            description="预置工具的只读目录（Docker 镜像内使用）"
+            description="预置工具的只读目录"
             effectiveValue={config.actual_read_only_tool_folder}
           >
             <Form.Item name="read_only_tool_folder" noStyle>
@@ -916,46 +915,6 @@ const GlobalSettings: React.FC<{
             />
           </Card>
         )}
-
-        {/* 自动更新设置 */}
-        <Card title="自动更新设置" size="small" style={{ marginBottom: 16 }} id="global-update">
-          <ConfigField
-            label="自动检查更新"
-            description="程序启动后自动检查是否有新版本"
-            valueDisplay={(config as any).update?.auto_check ? '已启用' : '已禁用'}
-          >
-            <Form.Item name={['update', 'auto_check']} valuePropName="checked" noStyle>
-              <Switch />
-            </Form.Item>
-          </ConfigField>
-          <ConfigField
-            label="检查间隔（小时）"
-            description="自动检查更新的时间间隔"
-            valueDisplay={(config as any).update?.check_interval_hours || 6}
-          >
-            <Form.Item name={['update', 'check_interval_hours']} noStyle>
-              <InputNumber min={1} max={168} style={{ width: 200 }} />
-            </Form.Item>
-          </ConfigField>
-          <ConfigField
-            label="自动下载更新"
-            description="检测到新版本后自动下载，禁用时需要手动触发下载"
-            valueDisplay={(config as any).update?.auto_download ? '已启用' : '已禁用'}
-          >
-            <Form.Item name={['update', 'auto_download']} valuePropName="checked" noStyle>
-              <Switch />
-            </Form.Item>
-          </ConfigField>
-          <ConfigField
-            label="包含预发布版本"
-            description="启用后会检查预发布版本（beta/rc），可能包含不稳定功能"
-            valueDisplay={(config as any).update?.include_prerelease ? '已启用' : '已禁用'}
-          >
-            <Form.Item name={['update', 'include_prerelease']} valuePropName="checked" noStyle>
-              <Switch />
-            </Form.Item>
-          </ConfigField>
-        </Card>
 
         <div className="config-actions">
           <Button

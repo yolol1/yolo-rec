@@ -65,15 +65,10 @@ const CATEGORY_CONFIG: Record<string, { name: string; color: string; description
     color: '#fa8c16',
     description: 'BililiveRecorder (录播姬) 子进程的物理内存。',
   },
-  launcher: {
-    name: '启动器',
-    color: '#2f54eb',
-    description: '启动器进程的物理内存。',
-  },
   container: {
     name: '容器总内存',
     color: '#fa541c',
-    description: '容器 (Docker/cgroup) 报告的总内存使用。这是 cgroup memory.current 的值，包含了容器内所有进程的内存、内核缓存、页缓存等。数值通常远大于各进程 RSS 之和，因为它也算入了操作系统用于缓存文件的内存。',
+    description: '容器 cgroup 报告的总内存使用。该值包含容器内所有进程的内存、内核缓存和页缓存，通常远大于各进程 RSS 之和。',
   },
   total: {
     name: '总内存',

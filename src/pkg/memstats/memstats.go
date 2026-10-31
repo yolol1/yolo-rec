@@ -1,5 +1,5 @@
 // Package memstats 提供内存统计功能
-// 用于收集 bililive-go 自身、子进程和 Docker 容器的内存使用信息
+// 用于收集 bililive-go 自身、子进程和容器环境的内存使用信息
 package memstats
 
 // MemoryStats 内存统计信息

@@ -67,8 +67,8 @@ jobs:
           cache-dependency-path: '**/go.sum'
       - uses: golangci/golangci-lint-action@v8
         with:
-          working-directory: src/
-          args: --build-tags=dev
+          args: --build-tags=dev ./...
+          only-new-issues: true
   check-agents:
     name: Check AI Instruction Files
     needs: go-cache

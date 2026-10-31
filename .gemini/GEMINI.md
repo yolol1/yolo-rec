@@ -21,16 +21,12 @@
 3. **提交前检查**：确保 `make build-web dev`、`make lint`、`make test` 全部通过
 4. **自动提交**：完成代码修复或优化后，应主动执行 `git commit` 提交变更；提交信息使用中文，说明本次改动内容。`git push` 仅在用户明确要求时执行
 
-## 详细指南（Skills）
+## 工具链版本
 
-更多详细信息请查阅 `.agent/skills/` 目录下的相关指南：
-
-| Skill | 说明 |
-|-------|------|
-| `build` | 编译命令、build tags、代码检查 |
-| `config-modification` | 配置修改同步、层级配置系统 |
-| `test-e2e` | Playwright E2E 测试 |
-| `version-switching` | 不停机版本切换设计规范（Docker/独立运行） |
+- Go：以 `go.mod` 为准（当前为 1.25）。
+- Node.js：以 `.node-version` 为准。
+- 包管理器：统一使用 Yarn 1.22.22 和已提交的 `yarn.lock`。
+- Go lint：统一使用 golangci-lint v2，配置以 `.golangci.yml` 为准。
 
 ## 快速参考
 
@@ -44,11 +40,14 @@ make build-web dev
 # 代码检查
 make lint
 
+# 全量检查（当前仍有历史 lint 债务时使用）
+make lint-full
+
 # 单元测试
 make test
 
 # E2E 测试
-npx playwright test
+make test-e2e
 
 # 同步 AI 指示文件
 make sync-agents
