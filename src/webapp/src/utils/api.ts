@@ -81,6 +81,14 @@ class API {
     }
 
     /**
+     * 创建稳定的本地播放地址（仅转发直播流，不录制）
+     * @param id 直播间id
+     */
+    createLivePlayback(id: string) {
+        return utils.requestPost(`${BASE_URL}/lives/${id}/playback`);
+    }
+
+    /**
      * 启用自动录制
      * @param id 直播间id
      */

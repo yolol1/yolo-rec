@@ -91,7 +91,8 @@ func initMux(ctx context.Context) *mux.Router {
 	apiRoute.HandleFunc("/lives/{id}/name-history", getLiveNameHistory).Methods("GET")   // 获取名称变更历史
 	apiRoute.HandleFunc("/lives/{id}/history", getLiveHistory).Methods("GET")            // 获取统一历史事件（支持分页筛选）
 	apiRoute.HandleFunc("/lives/{id}/switchStream", switchStreamHandler).Methods("POST") // 切换流设置（需要请求体，必须在通配符之前）
-	apiRoute.HandleFunc("/lives/{id}/{action}", parseLiveAction).Methods("GET")          // 通配符路由必须放在最后
+	RegisterPlaybackHandlers(apiRoute)
+	apiRoute.HandleFunc("/lives/{id}/{action}", parseLiveAction).Methods("GET") // 通配符路由必须放在最后
 	apiRoute.HandleFunc("/file/{path:.*}", getFileInfo).Methods("GET")
 	apiRoute.HandleFunc("/file/{path:.*}", renameFile).Methods("PUT")
 	apiRoute.HandleFunc("/file/{path:.*}", deleteFile).Methods("DELETE")

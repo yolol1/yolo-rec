@@ -217,12 +217,23 @@ func copyResponseHeaders(dst, src http.Header) {
 	}
 }
 
-// rewritePlaylist 重写 m3u8 内容。
-// 核心职责：
-// 1. 把分段 URL 重写到本地代理；
-// 2. 把 EXT-X-MAP 中的 URI 也重写到本地代理；
-// 3. 在需要时过滤掉 Soop 的 preloading 分片，并同步丢弃其前置标签。
-func rewritePlaylist(content string, upstreamURL, localBaseURL *url.URL, filterPreloading bool) (string, error) {
+// MediaURLBuilder 将一个已解析的上游媒体地址转换为播放器请求的本地地址。
+type MediaURLBuilder func(target *url.URL) string
+
+// RewritePlaylist 使用调用方提供的地址映射函数重写 HLS 播放列表。
+func RewritePlaylist(
+	content string,
+	upstreamURL *url.URL,
+	buildMediaURL MediaURLBuilder,
+	filterPreloading bool,
+) (string, error) {
+	if upstreamURL == nil {
+		return "", fmt.Errorf("HLS 上游地址为空")
+	}
+	if buildMediaURL == nil {
+		return "", fmt.Errorf("HLS 媒体地址映射函数为空")
+	}
+
 	lines := strings.Split(content, "\n")
 	output := make([]string, 0, len(lines))
 	pending := make([]string, 0, 4)
@@ -243,7 +254,7 @@ func rewritePlaylist(content string, upstreamURL, localBaseURL *url.URL, filterP
 		}
 
 		if strings.HasPrefix(trimmed, "#") {
-			rewrittenTag := rewriteTagURI(trimmed, upstreamURL, localBaseURL)
+			rewrittenTag := rewriteTagURIWithBuilder(trimmed, upstreamURL, buildMediaURL)
 			if isURIRelatedTag(trimmed) {
 				pending = append(pending, rewrittenTag)
 			} else {
@@ -258,14 +269,14 @@ func rewritePlaylist(content string, upstreamURL, localBaseURL *url.URL, filterP
 			return "", fmt.Errorf("解析 HLS 分段相对地址失败: %w", err)
 		}
 		if filterPreloading && strings.Contains(absURL.String(), "preloading") {
-			// preloading 片段对应的 EXTINF / 标签也一并丢弃，避免出现“标签存在但媒体 URI 被删掉”的非法 m3u8。
+			// preloading 片段对应的 EXTINF / 标签也一并丢弃，避免生成非法 m3u8。
 			pending = pending[:0]
 			filteredSegments++
 			continue
 		}
 
 		flushPending()
-		output = append(output, buildLocalMediaURL(localBaseURL, absURL.String()))
+		output = append(output, buildMediaURL(absURL))
 	}
 
 	flushPending()
@@ -273,7 +284,18 @@ func rewritePlaylist(content string, upstreamURL, localBaseURL *url.URL, filterP
 	return strings.Join(output, "\n") + "\n", nil
 }
 
-// buildLocalMediaURL 将上游媒体地址映射到本地代理的 /media 路径。
+// rewritePlaylist 重写 m3u8 内容。
+// 核心职责：
+// 1. 把分段 URL 重写到本地代理；
+// 2. 把 EXT-X-MAP 中的 URI 也重写到本地代理；
+// 3. 在需要时过滤掉 Soop 的 preloading 分片，并同步丢弃其前置标签。
+func rewritePlaylist(content string, upstreamURL, localBaseURL *url.URL, filterPreloading bool) (string, error) {
+	return RewritePlaylist(content, upstreamURL, func(target *url.URL) string {
+		return buildLocalMediaURL(localBaseURL, target.String())
+	}, filterPreloading)
+}
+
+// buildLocalMediaURL 将上游媒体地址映射到本地代理路径。
 func buildLocalMediaURL(localBaseURL *url.URL, target string) string {
 	u := *localBaseURL
 	u.Path = "/media"
@@ -283,8 +305,8 @@ func buildLocalMediaURL(localBaseURL *url.URL, target string) string {
 	return u.String()
 }
 
-// rewriteTagURI 重写 EXT-X-MAP 等标签中的 URI 属性。
-func rewriteTagURI(line string, upstreamURL, localBaseURL *url.URL) string {
+// rewriteTagURIWithBuilder 重写 EXT-X-MAP 等标签中的 URI 属性。
+func rewriteTagURIWithBuilder(line string, upstreamURL *url.URL, buildMediaURL MediaURLBuilder) string {
 	if !strings.Contains(line, `URI="`) {
 		return line
 	}
@@ -305,7 +327,7 @@ func rewriteTagURI(line string, upstreamURL, localBaseURL *url.URL) string {
 		return line
 	}
 
-	return line[:valueStart] + buildLocalMediaURL(localBaseURL, absURL.String()) + line[valueStart+end:]
+	return line[:valueStart] + buildMediaURL(absURL) + line[valueStart+end:]
 }
 
 // isURIRelatedTag 判断当前标签是否属于“紧邻下一个媒体 URI”的伴随标签。

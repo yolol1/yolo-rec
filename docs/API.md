@@ -164,6 +164,28 @@
         "recording": false
     }
     ```
+
+## `POST /api/lives/{id}/playback` 创建播放器直播地址
+
+该接口按直播间当前流偏好解析直播流，返回稳定的本地播放地址。播放地址只实时转发 FLV 或 HLS 数据，不会创建录制任务，也不会写入视频文件。
+
+- 请求：
+    ```text
+    method: POST
+    path: http://127.0.0.1:8080/api/lives/212d9c98c7b376b730d4336bb49f6d3f/playback
+    ```
+- 响应：
+    ```json
+    {
+      "url": "/api/playback/6Bz5b9Y5xQ0fVg7oPqRwSg/stream.flv",
+      "format": "flv",
+      "quality": "原画",
+      "stream_name": "原画 - flv",
+      "proxy": true
+    }
+    ```
+
+返回的 `url` 是相对于服务根路径的地址。浏览器中会使用当前 WebUI 的来源地址生成完整播放地址，可直接复制到 PotPlayer 等支持网络串流的播放器。播放会话默认持续 24 小时，期间每次访问都会续期；服务重启后需重新创建地址。
         
 ## `GET /api/config` Get config info
 - Request:  

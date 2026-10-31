@@ -1,6 +1,6 @@
 import React from "react";
-import { Button, Divider, Table, Tag, Tabs, Row, Col, Tooltip, message, List, Typography, Switch, Space, Popconfirm, Select } from 'antd';
-import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined, VideoCameraOutlined, VideoCameraAddOutlined, DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Button, Divider, Table, Tag, Tabs, Row, Col, Tooltip, message, List, Typography, Switch, Space, Popconfirm, Select, Modal, Input } from 'antd';
+import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined, VideoCameraOutlined, VideoCameraAddOutlined, DeleteOutlined, FolderOpenOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import PopDialog from '../pop-dialog/index';
 import AddRoomDialog from '../add-room-dialog/index';
 import LogPanel from '../log-panel/index';
@@ -14,6 +14,7 @@ import { useNavigate, NavigateFunction } from "react-router-dom";
 import EditCookieDialog from "../edit-cookie/index";
 import { RoomConfigForm } from "../config-info";
 import { StreamAttributes } from '../../types/stream';
+import copy from 'copy-to-clipboard';
 
 const api = new API();
 const { Text } = Typography;
@@ -356,6 +357,54 @@ class LiveList extends React.Component<Props, IState> {
     //倒计时定时器
     countdownTimer!: NodeJS.Timeout;
 
+    openPlayerAddress = async (data: ItemData) => {
+        const hideLoading = message.loading('正在获取播放地址...', 0);
+        try {
+            const response = await api.createLivePlayback(data.roomId) as {
+                url: string;
+                format: string;
+                quality?: string;
+                stream_name?: string;
+            };
+            const playbackURL = new URL(response.url, window.location.href).toString();
+            const formatLabel = response.format === 'hls' ? 'HLS' : 'FLV';
+
+            Modal.info({
+                title: '用播放器观看直播',
+                width: 680,
+                content: (
+                    <div style={{ paddingTop: 12 }}>
+                        <p style={{ marginBottom: 8 }}>
+                            将下面的地址粘贴到 PotPlayer 或其他支持网络串流的播放器中。此功能只转发直播流，不会生成录制文件。
+                        </p>
+                        <Input
+                            readOnly
+                            value={playbackURL}
+                            onFocus={(event) => event.currentTarget.select()}
+                        />
+                        <div style={{ marginTop: 10, color: '#666' }}>
+                            格式：{formatLabel}
+                            {response.quality ? `，清晰度：${response.quality}` : ''}
+                            {response.stream_name ? `，流：${response.stream_name}` : ''}
+                        </div>
+                    </div>
+                ),
+                okText: '复制地址',
+                onOk: () => {
+                    if (copy(playbackURL)) {
+                        message.success('播放地址已复制');
+                    } else {
+                        message.error('复制失败，请手动选择地址复制');
+                    }
+                },
+            });
+        } catch (error) {
+            message.error(`获取播放地址失败: ${error}`);
+        } finally {
+            hideLoading();
+        }
+    };
+
     runStatus: ColumnsType<ItemData>[number] = {
         title: '运行状态',
         key: 'tags',
@@ -552,6 +601,23 @@ class LiveList extends React.Component<Props, IState> {
                                 </PopDialog>
                             )}
                         </>
+                    )}
+
+                    {data.isLiving && (
+                        <Tooltip title="生成播放器地址，不录制">
+                            <Button
+                                size="small"
+                                type="default"
+                                shape="round"
+                                icon={<PlayCircleOutlined />}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    this.openPlayerAddress(data);
+                                }}
+                            >
+                                观看
+                            </Button>
+                        </Tooltip>
                     )}
 
                     <PopDialog title="确定删除当前直播间？"
